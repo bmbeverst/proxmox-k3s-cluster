@@ -1,0 +1,11 @@
+- name: My first play
+  hosts: k3s
+  gather_facts: false
+  tasks:
+   - name: Ping my hosts
+     changed_when: false
+     ansible.builtin.raw: hostname
+     register: hostname_result
+   - name: Show the value of output
+     changed_when: false
+     ansible.builtin.raw: var=hostname_result.stdout_lines

@@ -1,0 +1,19 @@
+k3s_init:
+  hosts:
+    k3sserver01:
+      ansible_host: 10.10.1.41
+
+
+k3s_client:
+  hosts:
+    k3sserver02:
+      ansible_host: 10.10.1.42
+    k3sserver03:
+      ansible_host: 10.10.1.43
+
+k3s:
+  children:
+    k3s_init:
+    k3s_client:
+  vars:
+    ansible_user: core
