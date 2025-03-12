@@ -1,0 +1,33 @@
+- name: Install kured to k3s
+  hosts: k3s_init
+  gather_facts: false
+  tasks:
+    - name: Check if already installed
+      ansible.builtin.raw: ls /var/lib/rancher/k3s/server/manifests/kured.yaml
+      register: ls_output
+      changed_when: false
+      ignore_errors: true
+      become: true
+    - name: Fail if already installed
+      ansible.builtin.fail:
+        msg: kured is already installed
+      when: ls_output.rc == 0
+    - name: Create kured install file
+      ansible.posix.synchronize:
+        src: "files/kured-chart.txt"
+        dest: "/tmp/kured.yaml"
+    - name: Set permissions kured install file
+      ansible.builtin.raw: chmod 600 /tmp/kured.yaml
+      register: chmod_output
+      changed_when: false
+    - name: Set owner kured install file
+      ansible.builtin.raw: chown root:root /tmp/kured.yaml
+      register: chown_output
+      changed_when: false
+      become: true
+    - name: Move to k3s manifests
+      ansible.builtin.raw: "[ ! -f /var/lib/rancher/k3s/server/manifests/kured.yaml ] && mv /tmp/kured.yaml /var/lib/rancher/k3s/server/manifests/kured.yaml"
+      register: mv_output
+      changed_when: mv_output.rc == 0
+      ignore_errors: true
+      become: true

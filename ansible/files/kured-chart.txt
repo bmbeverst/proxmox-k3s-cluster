@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: kured
+---
+apiVersion: helm.cattle.io/v1
+kind: HelmChart
+metadata:
+  name: kured
+  namespace: kured
+spec:
+  repo: https://kubereboot.github.io/charts
+  chart: kured
+  targetNamespace: kured
