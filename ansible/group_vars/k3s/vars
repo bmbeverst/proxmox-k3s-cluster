@@ -2,5 +2,5 @@
 # nonsensitive data
 
 k3s_token: "{{ vault_k3s_token }}"
-init_node_ip: 10.10.1.41
+init_node_ip: 10.10.1.51
 tls_san: 10.10.1.99

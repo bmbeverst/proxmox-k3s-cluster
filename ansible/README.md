@@ -2,6 +2,8 @@
 Play books to create a k3s cluster.
 
 
+# Requirements
+`ansible-galaxy collection install ansible.posix` the only way to copy files without Python
 
 # Variables
 Are defined per group in the `group_var` folder, the name is important. Then vars are split by group name, `k3s` for example.

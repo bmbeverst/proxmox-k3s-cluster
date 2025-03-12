@@ -2,40 +2,69 @@
   hosts: k3s_init
   gather_facts: false
   tasks:
-   - name: Check if already installed
-     ansible.builtin.raw: ls /etc/rancher/k3s/k3s.yaml
-     register: ls_output
-     changed_when: false
-   - name: Fail if already installed
-     ansible.builtin.fail:
-      msg: k3s is already installed
-     when: ls_output.rc == 0
-   - name: Create new cluster master node
-     ansible.builtin.raw: curl -sfL https://get.k3s.io | sh -s - --secrets-encryption --token "{{ k3s_token }}" --tls-san "{{ tls_san }}" --cluster-init
-     register: k3s_output
-     changed_when: true
-   - name: Debug initial k3s cluster init
-     ansible.builtin.debug:
-      var: k3s_output.stdout_lines
-      verbosity: 0
-
+    - name: Check if already installed
+      ansible.builtin.raw: ls /etc/rancher/k3s/k3s.yaml
+      register: ls_output
+      changed_when: false
+      ignore_errors: true
+    - name: Fail if already installed
+      ansible.builtin.fail:
+        msg: k3s is already installed
+      when: ls_output.rc == 0
+    - name: Create new cluster master node
+      ansible.builtin.raw: curl -sfL https://get.k3s.io | sh -s - --secrets-encryption --token "{{ k3s_token }}" --tls-san "{{ tls_san }}" --cluster-init
+      register: k3s_output
+      changed_when: true
+    - name: Debug initial k3s cluster init
+      ansible.builtin.debug:
+        var: k3s_output.stdout_lines
+        verbosity: 0
+    - name: Check if init node is reachable on 6443
+      ansible.builtin.raw: /usr/bin/curl --connect-timeout 10 --silent --show-error "{{ init_node_ip }}":6443
+      register: res
+      failed_when: res.rc in [28] or res.stderr is search("No route to host")
+      changed_when: false
+      ignore_errors: true
 - name: Init all k3s cluster hosts
   hosts: k3s_client
   gather_facts: false
   tasks:
-   - name: Check if already installed
-     ansible.builtin.raw: ls /etc/rancher/k3s/k3s.yaml
-     register: ls_output
-     changed_when: false
-   - name: Fail if already installed
-     ansible.builtin.fail:
-      msg: k3s is already installed
-     when: ls_output.rc == 0
-   - name: Add other nodes to cluster
-     ansible.builtin.raw: curl -sfL https://get.k3s.io | sh -s - --secrets-encryption --token "{{ k3s_token }}" --tls-san "{{ tls_san }}" --server https://"{{ init_node_ip }}":6443
-     register: k3s_output
-     changed_when: true
-   - name: Debug all k3s cluster init
-     ansible.builtin.debug:
-      var: k3s_output.stdout_lines
-      verbosity: 0
+    - name: Check if already installed
+      ansible.builtin.raw: ls /etc/rancher/k3s/k3s.yaml
+      register: ls_output
+      changed_when: false
+      ignore_errors: true
+    - name: Fail if already installed
+      ansible.builtin.fail:
+        msg: k3s is already installed
+      when: ls_output.rc == 0
+    - name: Add other nodes to cluster
+      ansible.builtin.raw: curl -sfL https://get.k3s.io | sh -s - --secrets-encryption --token "{{ k3s_token }}" --tls-san "{{ tls_san }}" --server https://"{{ init_node_ip }}":6443
+      register: k3s_output
+      changed_when: true
+    - name: Debug all k3s cluster init
+      ansible.builtin.debug:
+        var: k3s_output.stdout_lines
+        verbosity: 0
+- name: Limit systemd memory usage and size
+  hosts: k3s
+  gather_facts: false
+  tasks:
+    - name: Check if already installed
+      ansible.builtin.raw: grep ^SystemMaxUse /etc/systemd/journald.conf
+      register: grep_output
+      changed_when: false
+      ignore_errors: true
+    - name: Fail if journald is already configured
+      ansible.builtin.fail:
+        msg: journald is already configured
+      when: grep_output.rc == 0
+    - name: Add config to limit systemd in journald.conf
+      ansible.builtin.raw: |
+        echo -e "SystemMaxUse=256M    # Maximum total journal size\nRuntimeMaxUse=128M   # Maximum journal size in temporary storage\nMaxFileSec=1month    # Maximum time to retain log files" | sudo tee -a /etc/systemd/journald.conf
+      register: echo_output
+      changed_when: true
+    - name: Debug all k3s cluster init
+      ansible.builtin.debug:
+        var: echo_output.stdout_lines
+        verbosity: 0
