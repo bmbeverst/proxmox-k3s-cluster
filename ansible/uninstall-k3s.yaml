@@ -1,0 +1,21 @@
+- name: Uninstall k3s on all cluster hosts
+  hosts: k3s
+  gather_facts: false
+  tasks:
+    - name: Check if already uninstalled
+      ansible.builtin.raw: ls /opt/bin/k3s-uninstall.sh
+      register: ls_output
+      changed_when: false
+      ignore_errors: true
+    - name: Fail if already uninstalled
+      ansible.builtin.fail:
+        msg: k3s is already uninstalled
+      when: ls_output.rc == 2
+    - name: Uninstalled
+      ansible.builtin.raw: /opt/bin/k3s-uninstall.sh
+      register: k3s_output
+      changed_when: true
+    - name: Debug all k3s cluster init
+      ansible.builtin.debug:
+        var: k3s_output.stdout_lines
+        verbosity: 0
