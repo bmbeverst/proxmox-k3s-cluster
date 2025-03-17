@@ -23,3 +23,6 @@ Edit secrets with `ansible-vault edit group_var/k3s/vault`
 ## Debug output on playbook
 `ansible-playbook -vvvvv -i inventory.yaml init-cluster.yaml`
 
+## `did not find expected key` for a apply command using stdin
+
+This is due to bash replacing anything `$var` with the variable name which is nothing in the case of $patch for kustomize. Use a backslash to fix it, `\$patch: delete,
