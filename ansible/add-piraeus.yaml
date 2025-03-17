@@ -1,0 +1,93 @@
+- name: Install piraeus operator
+  hosts: k3s_init
+  gather_facts: false
+  tasks:
+    - name: Check if already installed
+      ansible.builtin.raw: /opt/bin/kubectl get all -n piraeus-datastore
+      register: kubectl_output
+      changed_when: false
+      ignore_errors: true
+      become: true
+    - name: Fail if already installed
+      ansible.builtin.fail:
+        msg: piraeus is already installed
+      when: '"No resources found" not in kubectl_output.stdout'
+    - name: Create new cluster master node
+      ansible.builtin.raw: /opt/bin/kubectl apply --server-side -k "https://github.com/piraeusdatastore/piraeus-operator//config/default?ref=v2.8.0"
+      register: apply_output
+      changed_when: true
+      become: true
+    - name: Debug piraeus init
+      ansible.builtin.debug:
+        var: apply_output.stdout_lines
+        verbosity: 0
+    - name: Wait for piraeus to be ready
+      ansible.builtin.raw: /opt/bin/kubectl wait pod --for=condition=Ready -n piraeus-datastore -l app.kubernetes.io/component=piraeus-operator
+      register: ready_output
+      failed_when: '"condition met" not in ready_output.stdout'
+      changed_when: false
+      become: true
+    - name: Debug piraeus wait
+      ansible.builtin.debug:
+        var: ready_output.stdout_lines
+        verbosity: 0
+    - name: Configure piraeus for flatcar
+      ansible.builtin.raw: |
+        kubectl apply -f - <<EOF
+        ---
+        apiVersion: piraeus.io/v1
+        kind: LinstorSatelliteConfiguration
+        metadata:
+          name: no-usr-src-mount
+        spec:
+          podTemplate:
+            spec:
+              volumes:
+                - name: usr-src
+                  \$patch: delete
+              initContainers:
+                - name: drbd-module-loader
+                  volumeMounts:
+                    - mountPath: /usr/src
+                      name: usr-src
+                      \$patch: delete
+        EOF
+      register: config_output
+      changed_when: false
+      become: true
+    - name: Debug piraeus config
+      ansible.builtin.debug:
+        var: config_output.stdout_lines
+        verbosity: 0
+    - name: Create piraeus cluster
+      ansible.builtin.raw: |
+        kubectl apply -f - <<EOF
+        apiVersion: piraeus.io/v1
+        kind: LinstorCluster
+        metadata:
+          name: linstorcluster
+        spec: {}
+        EOF
+      register: cluster_output
+      changed_when: false
+      become: true
+    - name: Debug piraeus cluster
+      ansible.builtin.debug:
+        var: cluster_output.stdout_lines
+        verbosity: 0
+    - name: Wait for piraeus to compile
+      ansible.builtin.raw: |
+        iter=0
+        until curl --output /dev/null --silent --head --fail "{{ init_node_ip }}":6443; do
+            printf '.'
+            sleep 5
+            ((x++))
+            if [ $x -gt 120 ]; then exit 1; fi
+        done
+      register: compile_output
+      changed_when: false
+      become: true
+    - name: Debug piraeus compile
+      ansible.builtin.debug:
+        var: compile_output.stdout_lines
+        verbosity: 0
