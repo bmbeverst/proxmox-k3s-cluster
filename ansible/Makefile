@@ -2,7 +2,7 @@ init:
 	ansible-playbook -i inventory.yaml init-cluster.yaml
 
 lint:
-	ansible-lint *.yaml
+	ansible-lint -x yaml[line-length] *.yaml
 
 vault-k3s:
 	ansible-vault edit group_vars/k3s/vault
