@@ -1,0 +1,85 @@
+- name: Install piraeus operator
+  hosts: k3s_init
+  gather_facts: false
+  tasks:
+    - name: Check if already installed
+      ansible.builtin.raw: /opt/bin/kubectl get all -n system-upgrade
+      register: kubectl_output
+      changed_when: false
+      ignore_errors: true
+      become: true
+    - name: Fail if already installed
+      ansible.builtin.fail:
+        msg: system-upgrade is already installed
+      when: '"No resources found" not in kubectl_output.stdout'
+    - name: Create new cluster master node
+      ansible.builtin.raw: /opt/bin/kubectl apply -f https://github.com/rancher/system-upgrade-controller/releases/latest/download/system-upgrade-controller.yaml
+      register: apply_output
+      changed_when: true
+      become: true
+    - name: Debug system-upgrade init
+      ansible.builtin.debug:
+        var: apply_output.stdout_lines
+        verbosity: 0
+    - name: Check if CRD already installed
+      ansible.builtin.raw: /opt/bin/kubectl get customresourcedefinition.apiextensions.k8s.io/plans.upgrade.cattle.io
+      register: crd_output
+      changed_when: false
+      ignore_errors: true
+      become: true
+    - name: Fail if already installed
+      ansible.builtin.fail:
+        msg: system-upgrade is already installed
+      when: '"NotFound" not in crd_output.stdout'
+    - name: Create new cluster master node
+      ansible.builtin.raw: /opt/bin/kubectl apply -f https://github.com/rancher/system-upgrade-controller/releases/latest/download/crd.yaml
+      register: apply_crd_output
+      changed_when: true
+      become: true
+    - name: Debug system-upgrade init
+      ansible.builtin.debug:
+        var: apply_crd_output.stdout_lines
+        verbosity: 0
+    - name: Configure system-upgrade
+      ansible.builtin.raw: |
+        kubectl apply -f - <<EOF
+        ---
+        apiVersion: upgrade.cattle.io/v1
+        kind: Plan
+        metadata:
+          name: plan-k3s-server-upgrade
+          namespace: system-upgrade
+        spec:
+          concurrency: 1
+          cordon: true
+          tolerations:
+            - effect: NoSchedule
+              operator: Exists
+            - key: CriticalAddonsOnly
+              operator: Exists
+            - effect: NoExecute
+              operator: Exists
+            - effect: NoSchedule
+              key: node-role.kubernetes.io/controlplane
+              operator: Exists
+            - effect: NoExecute
+              key: node-role.kubernetes.io/etcd
+              operator: Exists
+          nodeSelector:
+            matchExpressions:
+              - key: node-role.kubernetes.io/master
+                operator: In
+                values:
+                  - "true"
+          serviceAccountName: system-upgrade
+          upgrade:
+            image: rancher/k3s-upgrade
+          channel: https://update.k3s.io/v1-release/channels/stable
+        EOF
+      register: upgrade_output
+      changed_when: true
+      become: true
+    - name: Debug upgrade config
+      ansible.builtin.debug:
+        var: upgrade_output.stdout_lines
+        verbosity: 0
