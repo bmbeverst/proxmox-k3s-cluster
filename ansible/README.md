@@ -1,3 +1,7 @@
+# Deprecated 
+
+Decided to use pyinfra instead since I was just using this to run terminal commands anyways
+
 # Intro
 Play books to create a k3s cluster.
 

@@ -53,7 +53,7 @@
                       \$patch: delete
         EOF
       register: config_output
-      changed_when: true
+      changed_when: '"unchanged" not in config_output.stdout'
       become: true
     - name: Debug piraeus config
       ansible.builtin.debug:
@@ -69,7 +69,7 @@
         spec: {}
         EOF
       register: cluster_output
-      changed_when: true
+      changed_when: '"unchanged" not in cluster_output.stdout'
       become: true
     - name: Debug piraeus cluster
       ansible.builtin.debug:
@@ -90,4 +90,45 @@
     - name: Debug piraeus compile
       ansible.builtin.debug:
         var: compile_output.stdout_lines
+        verbosity: 0
+    - name: Create piraeus storage
+      ansible.builtin.raw: |
+        kubectl apply -f - <<EOF
+        apiVersion: piraeus.io/v1
+        kind: LinstorSatelliteConfiguration
+        metadata:
+          name: storage-pool
+        spec:
+          storagePools:
+            - name: pool1
+              fileThinPool:
+                directory: /var/lib/piraeus-datastore/pool1
+        EOF
+      register: storage_output
+      changed_when: '"unchanged" not in storage_output.stdout'
+      become: true
+    - name: Debug piraeus storage
+      ansible.builtin.debug:
+        var: storage_output.stdout_lines
+        verbosity: 0
+    - name: Create piraeus storage class
+      ansible.builtin.raw: |
+        kubectl apply -f - <<EOF
+        apiVersion: storage.k8s.io/v1
+        kind: StorageClass
+        metadata:
+          name: piraeus-storage
+        provisioner: linstor.csi.linbit.com
+        allowVolumeExpansion: true
+        volumeBindingMode: WaitForFirstConsumer
+        parameters:
+          linstor.csi.linbit.com/storagePool: pool1
+          linstor.csi.linbit.com/placementCount: "2"
+        EOF
+      register: storage_class_output
+      changed_when: '"unchanged" not in storage_class_output.stdout'
+      become: true
+    - name: Debug piraeus storage
+      ansible.builtin.debug:
+        var: storage_class_output.stdout_lines
         verbosity: 0

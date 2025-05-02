@@ -1,0 +1,16 @@
+[project]
+name = "proxmox-k3s-cluster"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "bandit>=1.8.3",
+    "isort>=6.0.1",
+    "mypy>=1.15.0",
+    "pulumi>=3.165.0",
+    "pulumi-proxmoxve>=7.0.0",
+    "pyinfra>=3.2",
+]
+[tool.uv]
+link-mode = "symlink"

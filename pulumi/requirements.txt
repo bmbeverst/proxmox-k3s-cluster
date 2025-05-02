@@ -1,0 +1,2 @@
+pulumi>=3
+pulumi_proxmoxve>=5.13.0

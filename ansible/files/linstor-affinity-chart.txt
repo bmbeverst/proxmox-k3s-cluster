@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: piraeus-datastore
+---
+apiVersion: helm.cattle.io/v1
+kind: HelmChart
+metadata:
+  name: linstor-affinity-controller
+  namespace: piraeus-datastore
+spec:
+  repo: https://piraeus.io/helm-charts/
+  chart: linstor-affinity-controller
+  targetNamespace: piraeus-datastore
