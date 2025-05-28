@@ -5,10 +5,13 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
+    "ansible-vault>=2.1.0",
     "bandit>=1.8.3",
     "isort>=6.0.1",
     "mypy>=1.15.0",
     "pulumi>=3.165.0",
+    "pulumi-esc-sdk>=0.12.1",
+    "pulumi-kubernetes>=4.23.0",
     "pulumi-proxmoxve>=7.0.0",
     "pyinfra>=3.2",
 ]

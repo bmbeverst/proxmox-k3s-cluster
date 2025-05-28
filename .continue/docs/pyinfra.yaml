@@ -1,0 +1,6 @@
+name: pyinfra
+version: 0.0.1
+schema: v1
+docs:
+  - name: pyinfra wiki
+    startUrl: https://docs.pyinfra.com/en/3.x/index.html
