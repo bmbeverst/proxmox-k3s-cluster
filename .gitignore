@@ -1,1 +1,4 @@
 pyinfra/.vault_pass
+pyinfra/pyinfra-debug.log
+*.pyc
+venv/
