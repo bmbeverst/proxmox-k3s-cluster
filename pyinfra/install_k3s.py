@@ -33,6 +33,7 @@ def wait_for_init_node(init_node_ip):
             raise Exception(f"Failed to connect to init node after 3 attempts")
 
 
+
 # Check if k3s is already installed
 if host.get_fact(Directory, "/etc/rancher/k3s/"):
     print("k3s is already installed")
@@ -45,6 +46,14 @@ else:
                 f'curl -sfL https://get.k3s.io | sh -s - --secrets-encryption --token "{k3s_token}" --tls-san "{tls_san}" --cluster-init'  # pylint: disable=line-too-long
             ],
         )
+
+        files.get(
+            name="Got k3s.yaml, change 'server:' and move to ~/.kube/config",
+            src="/etc/rancher/k3s/k3s.yaml",  # Path on the remote host
+            dest="k3s.yaml",              # Path on your local machine
+            _sudo=True
+        )
+        print("Copied k3s config to local machine at k3s.yaml")
 
         # Wait for k3s to be ready on init node
         # TODO fix that this executes after the curl commands, which is not correct
