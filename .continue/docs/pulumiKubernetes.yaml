@@ -1,0 +1,6 @@
+name: Pulumi kubernetes
+version: 0.0.1
+schema: v1
+docs:
+  - name: Pulumi kubernetes
+    startUrl: https://www.pulumi.com/registry/packages/kubernetes/

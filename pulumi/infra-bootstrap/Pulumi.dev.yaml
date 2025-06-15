@@ -1,0 +1,3 @@
+config:
+  infra-bootstrap:pulumiAccessToken:
+    secure: AAABAOe3OOxtuzDo2R/U0bhJ3Wj8ui/cv1cAWp6dVbp9/3D6aKIO3J/m9A7Uw1GQqeMQ/huIWu6DtEge6RjCMgPK3H1TzbRPrJe1fA==
