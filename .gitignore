@@ -2,3 +2,6 @@ pyinfra/.vault_pass
 pyinfra/pyinfra-debug.log
 *.pyc
 venv/
+__pycache__/
+.vault_pass
+vault
