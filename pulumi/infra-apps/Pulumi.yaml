@@ -1,0 +1,10 @@
+name: infra-apps
+description: The basic Infra apps from the k3s cluster
+runtime:
+  name: python
+  options:
+    toolchain: uv
+config:
+  pulumi:tags:
+    value:
+      pulumi:template: kubernetes-python

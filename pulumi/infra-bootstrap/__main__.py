@@ -16,6 +16,8 @@ namespace = Namespace(
 # Get the Pulumi API token.
 pulumi_config = Config()
 pulumi_access_token = pulumi_config.require_secret("pulumiAccessToken")
+gitlab_access_token = pulumi_config.require_secret("gitlabAccessToken")
+
 
 # Create a new Kubernetes Secret for the API Key
 pulumi_api_key = Secret(
@@ -38,11 +40,11 @@ pko = Chart(
     opts=ResourceOptions(depends_on=[pulumi_api_key]),
 )
 
-
-my_stack = CustomResource(
-    "my-stack",
+infra_apps = CustomResource(
+    "infra-apps",
     api_version="pulumi.com/v1",
     kind="Stack",
+    # There is no way to check these values in the pulumi code
     spec={
         "serviceAccountName": "pulumi",
         "envRefs": {
@@ -59,6 +61,38 @@ my_stack = CustomResource(
         "repoDir": "pulumi/infra-apps/",
         "branch": "main",
         "destroyOnFinalize": True,
+        "auth": {
+            "type": "personalAccessToken",
+            "personalAccessToken": gitlab_access_token,
+        },
+    },
+    opts=ResourceOptions(depends_on=[pko]),
+)
+
+infra_bootstrap = CustomResource(
+    "infra-bootstrap",
+    api_version="pulumi.com/v1",
+    kind="Stack",
+    spec={
+        "serviceAccountName": "pulumi",
+        "envRefs": {
+            "PULUMI_ACCESS_TOKEN": {
+                "type": "Secret",
+                "secret": {
+                    "name": pulumi_api_key.metadata.name,
+                    "key": "access_token",
+                },
+            },
+        },
+        "stack": "infra-bootstrap/dev",
+        "projectRepo": "https://gitlab.com/bmbeverst/proxmox-k3s-cluster.git",
+        "repoDir": "pulumi/infra-bootstrap/",
+        "branch": "main",
+        "destroyOnFinalize": True,
+        "auth": {
+            "type": "personalAccessToken",
+            "personalAccessToken": gitlab_access_token,
+        },
     },
     opts=ResourceOptions(depends_on=[pko]),
 )
