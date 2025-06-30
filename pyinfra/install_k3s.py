@@ -33,7 +33,6 @@ def wait_for_init_node(init_node_ip):
             raise Exception(f"Failed to connect to init node after 3 attempts")
 
 
-
 # Check if k3s is already installed
 if host.get_fact(Directory, "/etc/rancher/k3s/"):
     print("k3s is already installed")
@@ -50,8 +49,8 @@ else:
         files.get(
             name="Got k3s.yaml, change 'server:' and move to ~/.kube/config",
             src="/etc/rancher/k3s/k3s.yaml",  # Path on the remote host
-            dest="k3s.yaml",              # Path on your local machine
-            _sudo=True
+            dest="k3s.yaml",  # Path on your local machine
+            _sudo=True,
         )
         print("Copied k3s config to local machine at k3s.yaml")
 
@@ -81,21 +80,47 @@ else:
             # _timeout=120, # This can be an issue due to GitHub throttling
         )
 
+k3s_config = files.put(
+    name="Set image-gc-threshold in k3s/config.yaml",
+    src="files/k3s_config.yaml",
+    dest="/etc/rancher/k3s/config.yaml",
+    mode="644",
+    user="root",
+    group="root",
+    _sudo=True,
+)
+
+
+# Restart k3s if any configuration was changed
+systemd.service(
+    "k3s",
+    running=True,
+    restarted=True,
+    _if=k3s_config.did_change,
+    _sudo=True,
+)
+
 # Configure journald
 sys_max = files.line(
     name="Set SystemMaxUse in journald.conf",
     path="/etc/systemd/journald.conf",
-    line="SystemMaxUse=256M    # Maximum total journal size",
+    line="^SystemMaxUse.*",
+    replace="SystemMaxUse=256M    # Maximum total journal size",
+    _sudo=True,
 )
 run_max = files.line(
     name="Set RuntimeMaxUse in journald.conf",
     path="/etc/systemd/journald.conf",
-    line="RuntimeMaxUse=128M   # Maximum journal size in temporary storage",
+    line="^RuntimeMaxUse.*",
+    replace="RuntimeMaxUse=128M   # Maximum journal size in temporary storage",
+    _sudo=True,
 )
 file_max = files.line(
     name="Set MaxFileSec in journald.conf",
     path="/etc/systemd/journald.conf",
-    line="MaxFileSec=1month    # Maximum time to retain log files",
+    line="^MaxFileSec.*",
+    replace="MaxFileSec=14days    # Maximum time to retain log files",
+    _sudo=True,
 )
 
 
@@ -105,4 +130,5 @@ systemd.service(
     running=True,
     restarted=True,
     _if=any_changed(sys_max, run_max, file_max),
+    _sudo=True,
 )
