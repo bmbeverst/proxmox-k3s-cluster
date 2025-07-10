@@ -23,6 +23,7 @@ preview:
   stage: pulumi
   image: pulumi/pulumi-python:latest
   script:
+    - pip install .
     - pulumi preview -s bmbeverst/infra-apps/dev --cwd pulumi/infra-apps
   only:
     - merge_request
