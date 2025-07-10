@@ -23,6 +23,6 @@ preview:
   stage: pulumi
   image: pulumi/pulumi-go:latest
   script:
-    - pulumi preview -s bmbeverst/infra-apps
+    - pulumi preview -s bmbeverst/infra-apps/dev
   only:
     - merge_request
