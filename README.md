@@ -27,3 +27,13 @@ Pyinfra is an automation tool used to deploy and manage the k3s cluster. It prov
 - Configuration management for cluster components
 
 The project uses Pyinfra to orchestrate the deployment of k3s across multiple Flatcar nodes, ensuring consistent configuration and automated setup of the cluster.
+
+### Pulumi
+
+This the code to manage the kubernetes cluster using Pulumi. It provides a declarative way to define the infrastructure for the Kubernetes cluster, including the nodes, networking, and storage. The project uses Pulumi to automate the deployment of k3s across multiple Flatcar nodes, ensuring consistent configuration and automated setup of the cluster.
+
+Only the infra-apps and infra-bootstrap are used. infra-bootstrap is for the Pulumi Kubernetes Operator, which is responsible for managing the infrastructure for the Kubernetes cluster. The infra-apps is for managing the base applications that will be deployed on the nodes. For example, kured, piraeus, and system-upgrade.
+
+### Ansible
+
+This is no longer used for settting up the Flatcar nodes. It was replaced by Pyinfra for automated deployment of k3s across multiple Flatcar nodes. But Ansible was just bash command in YAML so I moved to Pyinfra.
