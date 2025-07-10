@@ -23,7 +23,8 @@ preview:
   stage: pulumi
   image: pulumi/pulumi-python:latest
   script:
-    - pip install .
-    - pulumi preview -s bmbeverst/infra-apps/dev --cwd pulumi/infra-apps
+    - curl -LsSf https://astral.sh/uv/install.sh | sh
+    - uv sync
+    - uv run pulumi preview -s bmbeverst/infra-apps/dev --cwd pulumi/infra-apps
   only:
     - merge_request
