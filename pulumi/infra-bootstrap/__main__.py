@@ -109,6 +109,7 @@ infra_apps = CustomResource(
     api_version="pulumi.com/v1",
     kind="Stack",
     # There is no way to check these values in the pulumi code
+    # Best way is to look at the CRD: https://github.com/pulumi/pulumi-kubernetes-operator/blob/master/deploy/crds/pulumi.com_stacks.yaml
     spec={
         "serviceAccountName": "pulumi",
         "envRefs": {
@@ -120,7 +121,7 @@ infra_apps = CustomResource(
                 },
             },
         },
-        "stack": "cyb3rkn19ht/infra-apps",
+        "stack": "bmbeverst/infra-apps",
         "projectRepo": "https://gitlab.com/bmbeverst/proxmox-k3s-cluster.git",
         "repoDir": "pulumi/infra-apps/",
         "branch": "main",
@@ -134,6 +135,7 @@ infra_apps = CustomResource(
             },
         },
         "destroyOnFinalize": True,
+        "refresh": True,
     },
     opts=ResourceOptions(depends_on=[pko]),
 )
@@ -157,7 +159,7 @@ infra_apps = CustomResource(
 #                 },
 #             },
 #         },
-#         "stack": "infra-bootstrap/dev",
+#         "stack": "bmbeverst/infra-bootstrap",
 #         "projectRepo": "https://gitlab.com/bmbeverst/proxmox-k3s-cluster.git",
 #         "repoDir": "pulumi/infra-bootstrap/",
 #         "branch": "main",
