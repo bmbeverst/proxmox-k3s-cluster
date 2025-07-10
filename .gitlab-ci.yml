@@ -21,7 +21,7 @@ secret_detection:
 
 preview:
   stage: pulumi
-  image: pulumi/pulumi-go:latest
+  image: pulumi/pulumi-python:latest
   script:
     - pulumi preview -s bmbeverst/infra-apps/dev --cwd pulumi/infra-apps
   only:
