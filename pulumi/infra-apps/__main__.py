@@ -1,21 +1,16 @@
-"""A Kubernetes Python Pulumi program"""
-
-from pulumi_kubernetes.apps.v1 import Deployment
+from pulumi_kubernetes.yaml.v2 import ConfigFile
 
 import pulumi
 
-app_labels = {"app": "nginx"}
+SUC_VERSION = "v0.19.2"
 
-deployment = Deployment(
-    "nginx",
-    spec={
-        "selector": {"match_labels": app_labels},
-        "replicas": 1,
-        "template": {
-            "metadata": {"labels": app_labels},
-            "spec": {"containers": [{"name": "nginx", "image": "nginx"}]},
-        },
-    },
+suc_crd = ConfigFile(
+    "system-upgrade-controller-crd",
+    file=f"https://github.com/rancher/system-upgrade-controller/releases/download/{SUC_VERSION}/crd.yaml",
 )
 
-pulumi.export("name", deployment.metadata["name"])
+suc = ConfigFile(
+    "system-upgrade-controller",
+    file=f"https://github.com/rancher/system-upgrade-controller/releases/download/{SUC_VERSION}/system-upgrade-controller.yaml",
+    opts=pulumi.ResourceOptions(depends_on=[suc_crd]),
+)
