@@ -1,5 +1,13 @@
 # Create a k3s cluster on Proxmox VMs with Flatcar
 
+## Dev
+
+You need to include the lint and infra groups for dependencies.
+
+`uv sync --all-groups`
+
+Also if coming back after python was updated redo the .venv with `uv venv` `source .venv/bin/activate` `uv sync --active --group lint`
+
 ## Components
 
 ### Flatcar

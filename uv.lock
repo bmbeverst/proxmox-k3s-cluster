@@ -558,30 +558,42 @@ name = "proxmox-k3s-cluster"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
-    { name = "ansible-vault" },
-    { name = "bandit" },
-    { name = "black" },
-    { name = "isort" },
-    { name = "mypy" },
     { name = "pulumi" },
     { name = "pulumi-esc-sdk" },
     { name = "pulumi-kubernetes" },
     { name = "pulumi-proxmoxve" },
+]
+
+[package.dev-dependencies]
+infra = [
+    { name = "ansible-vault" },
     { name = "pyinfra" },
+]
+lint = [
+    { name = "bandit" },
+    { name = "black" },
+    { name = "isort" },
+    { name = "mypy" },
 ]
 
 [package.metadata]
 requires-dist = [
-    { name = "ansible-vault", specifier = ">=2.1.0" },
-    { name = "bandit", specifier = ">=1.8.3" },
-    { name = "black", specifier = ">=25.1.0" },
-    { name = "isort", specifier = ">=6.0.1" },
-    { name = "mypy", specifier = ">=1.15.0" },
     { name = "pulumi", specifier = ">=3.165.0" },
     { name = "pulumi-esc-sdk", specifier = ">=0.12.1" },
     { name = "pulumi-kubernetes", specifier = ">=4.23.0" },
     { name = "pulumi-proxmoxve", specifier = ">=7.0.0" },
+]
+
+[package.metadata.requires-dev]
+infra = [
+    { name = "ansible-vault", specifier = ">=2.1.0" },
     { name = "pyinfra", specifier = ">=3.2" },
+]
+lint = [
+    { name = "bandit", specifier = ">=1.8.3" },
+    { name = "black", specifier = ">=25.1.0" },
+    { name = "isort", specifier = ">=6.0.1" },
+    { name = "mypy", specifier = ">=1.15.0" },
 ]
 
 [[package]]
