@@ -13,7 +13,6 @@ from pulumi import ResourceOptions
 SUC_VERSION = "v0.19.2"
 
 
-
 suc_crd = k8s.yaml.v2.ConfigFile(
     "system-upgrade-controller-crd",
     file=f"https://github.com/rancher/system-upgrade-controller/releases/download/{SUC_VERSION}/crd.yaml",
@@ -38,6 +37,21 @@ server_plan = CustomResource(
     spec={
         "concurrency": 1,
         "cordon": True,
+        # Drain the pods off the node before the upgrade job restarts k3s on
+        # the host. When drain is specified the node is cordoned automatically
+        # and uncordoned once the upgrade completes successfully.
+        "drain": {
+            # Delete bare pods not managed by a controller instead of
+            # failing the drain. The controller already passes
+            # --ignore-daemonsets and --delete-emptydir-data by default.
+            "force": True,
+            # On a 3-node cluster a PodDisruptionBudget can refuse evictions
+            # forever and hang the upgrade, so delete pods directly (still a
+            # graceful delete honoring terminationGracePeriodSeconds) and
+            # stop waiting on pods stuck terminating.
+            "disableEviction": True,
+            "skipWaitForDeleteTimeout": 60,
+        },
         "nodeSelector": {
             "matchExpressions": [
                 {
@@ -67,6 +81,21 @@ agent_plan = CustomResource(
     spec={
         "concurrency": 1,
         "cordon": True,
+        # Drain the pods off the node before the upgrade job restarts k3s on
+        # the host. When drain is specified the node is cordoned automatically
+        # and uncordoned once the upgrade completes successfully.
+        "drain": {
+            # Delete bare pods not managed by a controller instead of
+            # failing the drain. The controller already passes
+            # --ignore-daemonsets and --delete-emptydir-data by default.
+            "force": True,
+            # On a 3-node cluster a PodDisruptionBudget can refuse evictions
+            # forever and hang the upgrade, so delete pods directly (still a
+            # graceful delete honoring terminationGracePeriodSeconds) and
+            # stop waiting on pods stuck terminating.
+            "disableEviction": True,
+            "skipWaitForDeleteTimeout": 60,
+        },
         "nodeSelector": {
             "matchExpressions": [
                 {
