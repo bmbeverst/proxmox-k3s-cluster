@@ -11,6 +11,7 @@ from pulumi import ResourceOptions
 
 
 SUC_VERSION = "v0.19.2"
+KURED_CHART_VERSION = "6.1.0"  # appVersion: kured 1.23.0
 
 
 suc_crd = k8s.yaml.v2.ConfigFile(
@@ -164,4 +165,30 @@ suc_patch = k8s.apps.v1.DeploymentPatch(
         )
     ),
     opts=pulumi.ResourceOptions(depends_on=[suc]),
+)
+
+
+# Kured reboots nodes when update-engine touches /run/reboot-required (native since Flatcar 3067.0.0); chart defaults handle the sentinel path and control-plane taints.
+kured = k8s.helm.v3.Release(
+    "kured",
+    k8s.helm.v3.ReleaseArgs(
+        chart="kured",
+        version=KURED_CHART_VERSION,
+        namespace="kured",
+        create_namespace=True,
+        repository_opts=k8s.helm.v3.RepositoryOptsArgs(
+            repo="https://kubereboot.github.io/charts",
+        ),
+        values={
+            "configuration": {
+                # One node at a time: losing two of 3 control-plane nodes at once takes etcd down.
+                "concurrency": 1,
+                # Abort a PDB-hung drain after 10m; kured releases the lock and retries next period.
+                "drainTimeout": "10m",
+                "skipWaitForDeleteTimeout": 60,
+                # No reboot window: nodes reboot once an update is staged; set startTime/endTime/timeZone for a window.
+            },
+        },
+        timeout=600,
+    ),
 )
