@@ -122,7 +122,7 @@ infra_apps = CustomResource(
             },
         },
         "stack": "bmbeverst/infra-apps/dev",
-        "projectRepo": "https://gitlab.com/bmbeverst/proxmox-k3s-cluster.git",
+        "projectRepo": "https://gitlab.com/proxmox-k3s/proxmox-k3s-cluster.git",
         "repoDir": "pulumi/infra-apps/",
         "branch": "main",
         "gitAuth": {
@@ -160,7 +160,7 @@ infra_apps = CustomResource(
 #             },
 #         },
 #         "stack": "bmbeverst/infra-bootstrap",
-#         "projectRepo": "https://gitlab.com/bmbeverst/proxmox-k3s-cluster.git",
+#         "projectRepo": "https://gitlab.com/proxmox-k3s/proxmox-k3s-cluster.git",
 #         "repoDir": "pulumi/infra-bootstrap/",
 #         "branch": "main",
 #         "gitAuth": {
