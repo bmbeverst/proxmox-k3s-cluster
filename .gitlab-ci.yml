@@ -6,26 +6,26 @@
 # Note that environment variables can be set in several places
 # See https://docs.gitlab.com/ee/ci/variables/#cicd-variable-precedence
 stages:
-  - test
-  - secret-detection
+  - test # template security scans (semgrep-sast, secret_detection) default here
   - pulumi
-# Shared rules for the template security scans: every pipeline except scheduled ones.
-.no-schedule-rules: &no-schedule-rules
-  - if: $CI_PIPELINE_SOURCE == "schedule"
-    when: never
-  - when: on_success
+  - maintenance
 
-sast:
-  stage: test
-  rules: *no-schedule-rules
+# Only include the security scan templates in non-scheduled pipelines. This is
+# decided at config time by $CI_PIPELINE_SOURCE, which is set by GitLab itself
+# (only the scheduler produces "schedule" pipelines). We deliberately do NOT
+# use SAST_DISABLED / SECRET_DETECTION_DISABLED variables: pipeline variables
+# (Run pipeline form, `git push -o ci.variable=...`) take highest precedence
+# and would let anyone skip the scans on demand.
 include:
   - template: Security/SAST.gitlab-ci.yml
+    rules:
+      - if: $CI_PIPELINE_SOURCE != "schedule"
   - template: Security/Secret-Detection.gitlab-ci.yml
+    rules:
+      - if: $CI_PIPELINE_SOURCE != "schedule"
+
 variables:
   SECRET_DETECTION_ENABLED: "true"
-secret_detection:
-  stage: secret-detection
-  rules: *no-schedule-rules
 
 preview:
   stage: pulumi
@@ -35,17 +35,18 @@ preview:
     - uv sync
     - uv run pulumi preview -s bmbeverst/infra-apps/dev --cwd pulumi/infra-apps
   only:
-    - merge_request
+    - merge_requests
 
 # Automatically update dependencies via Renovate
 renovate:
-  stage: test
+  stage: maintenance
   image:
-    name: renovate/renovate:latest
+    # Renovate's gitlabci manager will update this
+    name: renovate/renovate:44.14.7
     entrypoint: [""] # the image entrypoint is the renovate binary itself
   variables:
     RENOVATE_PLATFORM: "gitlab"
-    RENOVATE_REPOSITORY: $CI_PROJECT_PATH
+    RENOVATE_REPOSITORIES: $CI_PROJECT_PATH
   script:
     - renovate
   only:
