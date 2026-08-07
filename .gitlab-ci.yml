@@ -9,8 +9,15 @@ stages:
   - test
   - secret-detection
   - pulumi
+# Shared rules for the template security scans: every pipeline except scheduled ones.
+.no-schedule-rules: &no-schedule-rules
+  - if: $CI_PIPELINE_SOURCE == "schedule"
+    when: never
+  - when: on_success
+
 sast:
   stage: test
+  rules: *no-schedule-rules
 include:
   - template: Security/SAST.gitlab-ci.yml
   - template: Security/Secret-Detection.gitlab-ci.yml
@@ -18,6 +25,7 @@ variables:
   SECRET_DETECTION_ENABLED: "true"
 secret_detection:
   stage: secret-detection
+  rules: *no-schedule-rules
 
 preview:
   stage: pulumi
