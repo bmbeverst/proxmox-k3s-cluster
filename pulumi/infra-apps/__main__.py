@@ -12,6 +12,7 @@ from pulumi import ResourceOptions
 
 SUC_VERSION = "v0.19.2"
 KURED_CHART_VERSION = "6.1.0"  # appVersion: kured 1.23.0
+KUBE_VIP_CHART_VERSION = "0.11.0"  # appVersion: kube-vip v1.2.2
 
 
 suc_crd = k8s.yaml.v2.ConfigFile(
@@ -168,7 +169,8 @@ suc_patch = k8s.apps.v1.DeploymentPatch(
 )
 
 
-# Kured reboots nodes when update-engine touches /run/reboot-required (native since Flatcar 3067.0.0); chart defaults handle the sentinel path and control-plane taints.
+# Kured reboots nodes when update-engine touches /run/reboot-required
+# chart defaults handle the sentinel path and control-plane taints.
 kured = k8s.helm.v3.Release(
     "kured",
     k8s.helm.v3.ReleaseArgs(
@@ -187,6 +189,43 @@ kured = k8s.helm.v3.Release(
                 "drainTimeout": "10m",
                 "skipWaitForDeleteTimeout": 60,
                 # No reboot window: nodes reboot once an update is staged; set startTime/endTime/timeZone for a window.
+            },
+        },
+        timeout=600,
+    ),
+)
+
+
+# kube-vip HA control plane on 10.10.1.99
+kube_vip = k8s.helm.v3.Release(
+    "kube-vip",
+    k8s.helm.v3.ReleaseArgs(
+        chart="kube-vip",
+        version=KUBE_VIP_CHART_VERSION,
+        namespace="kube-system",
+        repository_opts=k8s.helm.v3.RepositoryOptsArgs(
+            repo="https://kube-vip.github.io/helm-charts",
+        ),
+        values={
+            "config": {"address": "10.10.1.99"},
+            "env": {
+                "vip_interface": "eth0",
+                "vip_arp": "true",
+                "vip_subnet": "32",
+                "cp_enable": "true",
+                "svc_enable": "false",
+                "vip_leaderelection": "true",
+                "lb_enable": "false",
+                "vip_leaseduration": "5",
+                "vip_renewdeadline": "3",
+                "vip_retryperiod": "1",
+            },
+            "envValueFrom": {
+                "vip_nodename": {"fieldRef": {"fieldPath": "spec.nodeName"}},
+            },
+            "resources": {
+                "requests": {"cpu": "10m", "memory": "32Mi"},
+                "limits": {"cpu": "100m", "memory": "64Mi"},
             },
         },
         timeout=600,
