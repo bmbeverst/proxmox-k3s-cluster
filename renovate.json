@@ -12,7 +12,9 @@
   "customManagers": [
     {
       "customType": "regex",
-      "fileMatch": ["pulumi/infra-apps/__main__\\.py"],
+      "managerFilePatterns": [
+        "/pulumi/infra-apps/__main__\\.py/"
+      ],
       "matchStrings": ["SUC_VERSION = \"(?<currentValue>[^\"]+)\""],
       "depNameTemplate": "system-upgrade-controller",
       "packageNameTemplate": "rancher/system-upgrade-controller",
