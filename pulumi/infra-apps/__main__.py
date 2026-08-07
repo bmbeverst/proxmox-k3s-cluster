@@ -1,8 +1,11 @@
 """These are the apps that are setup to run the cluster infrastructure"""
 
 from typing import Optional
+import os
+
 import pulumi
 import pulumi_kubernetes as k8s
+import yaml
 
 from pulumi_kubernetes.apiextensions import CustomResource
 from pulumi_kubernetes.yaml.v2 import ConfigFile
@@ -11,8 +14,10 @@ from pulumi import ResourceOptions
 
 
 SUC_VERSION = "v0.19.2"
-KURED_CHART_VERSION = "6.1.0"  # appVersion: kured 1.23.0
-KUBE_VIP_CHART_VERSION = "0.11.0"  # appVersion: kube-vip v1.2.2
+
+# Chart repos/versions live in Chart.yaml so Renovate's helmv3 manager can bump them.
+with open(os.path.join(os.path.dirname(__file__), "Chart.yaml")) as f:
+    _chart_deps = {d["name"]: d for d in yaml.safe_load(f)["dependencies"]}
 
 
 suc_crd = k8s.yaml.v2.ConfigFile(
@@ -166,11 +171,11 @@ kured = k8s.helm.v3.Release(
     "kured",
     k8s.helm.v3.ReleaseArgs(
         chart="kured",
-        version=KURED_CHART_VERSION,
+        version=_chart_deps["kured"]["version"],
         namespace="kured",
         create_namespace=True,
         repository_opts=k8s.helm.v3.RepositoryOptsArgs(
-            repo="https://kubereboot.github.io/charts",
+            repo=_chart_deps["kured"]["repository"],
         ),
         values={
             "configuration": {
@@ -191,10 +196,10 @@ kube_vip = k8s.helm.v3.Release(
     "kube-vip",
     k8s.helm.v3.ReleaseArgs(
         chart="kube-vip",
-        version=KUBE_VIP_CHART_VERSION,
+        version=_chart_deps["kube-vip"]["version"],
         namespace="kube-system",
         repository_opts=k8s.helm.v3.RepositoryOptsArgs(
-            repo="https://kube-vip.github.io/helm-charts",
+            repo=_chart_deps["kube-vip"]["repository"],
         ),
         values={
             "config": {"address": "10.10.1.99"},

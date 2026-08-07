@@ -1,0 +1,22 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended"],
+  "minimumReleaseAge": "7 days",
+  "platformAutomerge": true,
+  "packageRules": [
+    {
+      "matchUpdateTypes": ["patch", "minor"],
+      "automerge": true
+    }
+  ],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "fileMatch": ["pulumi/infra-apps/__main__\\.py"],
+      "matchStrings": ["SUC_VERSION = \"(?<currentValue>[^\"]+)\""],
+      "depNameTemplate": "system-upgrade-controller",
+      "packageNameTemplate": "rancher/system-upgrade-controller",
+      "datasourceTemplate": "github-releases"
+    }
+  ]
+}

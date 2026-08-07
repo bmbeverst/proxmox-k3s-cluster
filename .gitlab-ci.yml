@@ -28,3 +28,17 @@ preview:
     - uv run pulumi preview -s bmbeverst/infra-apps/dev --cwd pulumi/infra-apps
   only:
     - merge_request
+
+# Automatically update dependencies via Renovate
+renovate:
+  stage: test
+  image:
+    name: renovate/renovate:latest
+    entrypoint: [""] # the image entrypoint is the renovate binary itself
+  variables:
+    RENOVATE_PLATFORM: "gitlab"
+    RENOVATE_REPOSITORY: $CI_PROJECT_PATH
+  script:
+    - renovate
+  only:
+    - schedules
