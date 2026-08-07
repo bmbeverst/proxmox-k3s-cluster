@@ -39,18 +39,16 @@ server_plan = CustomResource(
     spec={
         "concurrency": 1,
         "cordon": True,
-        # Drain the pods off the node before the upgrade job restarts k3s on
-        # the host. When drain is specified the node is cordoned automatically
-        # and uncordoned once the upgrade completes successfully.
+        # Drain the pods off the node before restart k3s
+        # cordon is automatically handled
         "drain": {
-            # Delete bare pods not managed by a controller instead of
-            # failing the drain. The controller already passes
-            # --ignore-daemonsets and --delete-emptydir-data by default.
+            # Delete manually started pods instead of
+            # failing the drain. Default --ignore-daemonsets and
+            # --delete-emptydir-data
             "force": True,
-            # On a 3-node cluster a PodDisruptionBudget can refuse evictions
-            # forever and hang the upgrade, so delete pods directly (still a
-            # graceful delete honoring terminationGracePeriodSeconds) and
-            # stop waiting on pods stuck terminating.
+            # PodDisruptionBudget can refuse evictions
+            # causing the upgrade to hang, directly delete pods
+            # but will kill after terminationGracePeriodSeconds
             "disableEviction": True,
             "skipWaitForDeleteTimeout": 60,
         },
@@ -81,20 +79,13 @@ agent_plan = CustomResource(
         "namespace": "system-upgrade",
     },
     spec={
+        # This is the same plan as the server-plan
+        # but with nodeSelector updated to exclude control-plane nodes.
+        # Currently no worker nodes :(
         "concurrency": 1,
         "cordon": True,
-        # Drain the pods off the node before the upgrade job restarts k3s on
-        # the host. When drain is specified the node is cordoned automatically
-        # and uncordoned once the upgrade completes successfully.
         "drain": {
-            # Delete bare pods not managed by a controller instead of
-            # failing the drain. The controller already passes
-            # --ignore-daemonsets and --delete-emptydir-data by default.
             "force": True,
-            # On a 3-node cluster a PodDisruptionBudget can refuse evictions
-            # forever and hang the upgrade, so delete pods directly (still a
-            # graceful delete honoring terminationGracePeriodSeconds) and
-            # stop waiting on pods stuck terminating.
             "disableEviction": True,
             "skipWaitForDeleteTimeout": 60,
         },
@@ -119,7 +110,7 @@ agent_plan = CustomResource(
     opts=ResourceOptions(depends_on=[server_plan]),
 )
 
-
+# Add the flatcar-specific SSL paths
 suc_patch = k8s.apps.v1.DeploymentPatch(
     "system-upgrade-controller-patch",
     metadata=k8s.meta.v1.ObjectMetaPatchArgs(
@@ -183,12 +174,11 @@ kured = k8s.helm.v3.Release(
         ),
         values={
             "configuration": {
-                # One node at a time: losing two of 3 control-plane nodes at once takes etcd down.
+                # One node at a time: losing two of three control-plane nodes takes down etcd
                 "concurrency": 1,
-                # Abort a PDB-hung drain after 10m; kured releases the lock and retries next period.
+                # Abort drain after 10m, kured retries.
                 "drainTimeout": "10m",
                 "skipWaitForDeleteTimeout": 60,
-                # No reboot window: nodes reboot once an update is staged; set startTime/endTime/timeZone for a window.
             },
         },
         timeout=600,
