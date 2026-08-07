@@ -13,7 +13,7 @@ from pulumi_kubernetes.yaml.v2 import ConfigFile
 from pulumi import ResourceOptions
 
 
-SUC_VERSION = "v0.19.2"
+SUC_VERSION = "v0.20.1"
 
 # Chart repos/versions live in Chart.yaml so Renovate's helmv3 manager can bump them.
 with open(os.path.join(os.path.dirname(__file__), "Chart.yaml")) as f:
