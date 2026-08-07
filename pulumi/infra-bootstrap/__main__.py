@@ -121,7 +121,7 @@ infra_apps = CustomResource(
                 },
             },
         },
-        "stack": "bmbeverst/infra-apps",
+        "stack": "bmbeverst/infra-apps/dev",
         "projectRepo": "https://gitlab.com/bmbeverst/proxmox-k3s-cluster.git",
         "repoDir": "pulumi/infra-apps/",
         "branch": "main",
