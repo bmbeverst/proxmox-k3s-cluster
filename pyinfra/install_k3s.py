@@ -132,3 +132,12 @@ systemd.service(
     _if=any_changed(sys_max, run_max, file_max),
     _sudo=True,
 )
+
+# Set REBOOT_STRATEGY=off to stage OS updates, let kured coordinate the reboot.
+files.line(
+    name="Set REBOOT_STRATEGY=off so kured coordinates reboots",
+    path="/etc/flatcar/update.conf",
+    line=r"^REBOOT_STRATEGY=.*",
+    replace="REBOOT_STRATEGY=off",
+    _sudo=True,
+)
