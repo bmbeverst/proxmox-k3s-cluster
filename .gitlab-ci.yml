@@ -30,12 +30,31 @@ variables:
 preview:
   stage: pulumi
   image: pulumi/pulumi-python:latest
+  # PULUMI_ACCESS_TOKEN is a masked + protected CI/CD variable. Protected
+  # variables reach MR pipelines only when the MR source branch is protected,
+  # so this job runs only for renovate/* branches: that pattern is protected
+  # (Settings -> Repository -> Protected branches) with push + force-push
+  # allowed for the bot's Maintainer token. MRs from unprotected branches
+  # skip this job; run `pulumi preview` locally for those instead.
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_SOURCE_BRANCH_NAME =~ /^renovate\//
+  before_script:
+    # The pulumi-kubernetes provider needs a parseable kubeconfig even for
+    # `preview`; rendering is client-side and never contacts a cluster.
+    - mkdir -p ~/.kube
+    - |
+      cat > ~/.kube/config <<'EOF'
+      apiVersion: v1
+      kind: Config
+      clusters: [{name: preview, cluster: {server: "https://127.0.0.1:6443"}}]
+      contexts: [{name: preview, context: {cluster: preview, user: preview}}]
+      current-context: preview
+      users: [{name: preview, user: {}}]
+      EOF
   script:
     - curl -LsSf https://astral.sh/uv/install.sh | sh
     - uv sync
     - uv run pulumi preview -s bmbeverst/infra-apps/dev --cwd pulumi/infra-apps
-  only:
-    - merge_requests
 
 # Automatically update dependencies via Renovate
 renovate:
