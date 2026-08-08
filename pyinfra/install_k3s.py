@@ -8,7 +8,6 @@ Skips the k3s install if already installed.
 from pyinfra import host
 from pyinfra.facts.files import Directory
 from pyinfra.operations import files, python, server, systemd
-from pyinfra.operations.util import any_changed
 
 # Get TLS SAN from host info
 tls_san = host.data.get("tls_san")
@@ -100,36 +99,36 @@ systemd.service(
     _sudo=True,
 )
 
-# Configure journald
-sys_max = files.line(
-    name="Set SystemMaxUse in journald.conf",
-    path="/etc/systemd/journald.conf",
-    line="^SystemMaxUse.*",
-    replace="SystemMaxUse=256M    # Maximum total journal size",
+# Configure journald via a drop-in: Flatcar ships no stock
+# /etc/systemd/journald.conf, and the previous files.line approach created a
+# sectionless main file that journald rejects ("Assignment outside of
+# section. Ignoring." at every boot).
+files.directory(
+    name="Create journald.conf.d",
+    path="/etc/systemd/journald.conf.d",
+    mode="755",
+    user="root",
+    group="root",
     _sudo=True,
 )
-run_max = files.line(
-    name="Set RuntimeMaxUse in journald.conf",
-    path="/etc/systemd/journald.conf",
-    line="^RuntimeMaxUse.*",
-    replace="RuntimeMaxUse=128M   # Maximum journal size in temporary storage",
-    _sudo=True,
-)
-file_max = files.line(
-    name="Set MaxFileSec in journald.conf",
-    path="/etc/systemd/journald.conf",
-    line="^MaxFileSec.*",
-    replace="MaxFileSec=14days    # Maximum time to retain log files",
+
+journald_dropin = files.put(
+    name="Set journald size caps via drop-in",
+    src="files/journald-caps.conf",
+    dest="/etc/systemd/journald.conf.d/10-size-caps.conf",
+    mode="644",
+    user="root",
+    group="root",
     _sudo=True,
 )
 
 
-# Restart journald if any configuration was changed
+# Restart journald if the drop-in changed
 systemd.service(
     "systemd-journald",
     running=True,
     restarted=True,
-    _if=any_changed(sys_max, run_max, file_max),
+    _if=journald_dropin.did_change,
     _sudo=True,
 )
 
