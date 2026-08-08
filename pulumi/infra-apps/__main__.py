@@ -220,3 +220,75 @@ kube_vip = k8s.helm.v3.Release(
         timeout=600,
     ),
 )
+
+
+# Piraeus (LINSTOR) storage: operator, satellites, and CSI driver in one chart.
+# PoC backing store is a file-thin pool on the root disk — the nodes have no
+# spare disks; switch to lvmThinPool + source.hostDevices if dedicated disks
+# are added to the VMs later.
+piraeus = k8s.helm.v3.Release(
+    "linstor-cluster",
+    k8s.helm.v3.ReleaseArgs(
+        chart="linstor-cluster",
+        version=_chart_deps["linstor-cluster"]["version"],
+        namespace="piraeus-datastore",
+        create_namespace=True,
+        repository_opts=k8s.helm.v3.RepositoryOptsArgs(
+            repo=_chart_deps["linstor-cluster"]["repository"],
+        ),
+        values={
+            "linstorSatelliteConfigurations": [
+                {
+                    "name": "storage-pool",
+                    "storagePools": [
+                        {
+                            "name": "file-thin",
+                            "fileThinPool": {
+                                "directory": "/var/lib/linstor-pools/file-thin",
+                            },
+                        },
+                    ],
+                    # Flatcar: /usr is read-only and /usr/src does not exist,
+                    # so drop the DRBD loader's bind mount (piraeus Flatcar how-to).
+                    "podTemplate": {
+                        "spec": {
+                            "volumes": [
+                                {"name": "usr-src", "$patch": "delete"},
+                            ],
+                            "initContainers": [
+                                {
+                                    "name": "drbd-module-loader",
+                                    "volumeMounts": [
+                                        {
+                                            "mountPath": "/usr/src",
+                                            "name": "usr-src",
+                                            "$patch": "delete",
+                                        },
+                                    ],
+                                },
+                            ],
+                        },
+                    },
+                },
+            ],
+            "storageClasses": [
+                {
+                    # local-path stays the default SC; linstor is opt-in per PVC
+                    "name": "linstor-r2",
+                    "reclaimPolicy": "Delete",
+                    "allowVolumeExpansion": True,
+                    "volumeBindingMode": "WaitForFirstConsumer",
+                    "provisioner": "linstor.csi.linbit.com",
+                    "parameters": {
+                        # Two replicas across the three nodes; a node without a
+                        # replica attaches diskless (allowRemoteVolumeAccess).
+                        "linstor.csi.linbit.com/autoPlace": "2",
+                        "linstor.csi.linbit.com/storagePool": "file-thin",
+                        "linstor.csi.linbit.com/allowRemoteVolumeAccess": "true",
+                    },
+                },
+            ],
+        },
+        timeout=600,
+    ),
+)
