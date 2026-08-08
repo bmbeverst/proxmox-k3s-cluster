@@ -222,20 +222,14 @@ kube_vip = k8s.helm.v3.Release(
 )
 
 
-# Piraeus operator first: its chart ships the piraeus.io/v1 CRDs
-# (installCRDs=true). The linstor-cluster chart below renders custom
-# resources and fails with "no matches for kind LinstorCluster" if the
-# CRDs are not registered yet.
+# Piraeus operator first
 piraeus_operator = k8s.helm.v3.Release(
     "piraeus-operator",
     k8s.helm.v3.ReleaseArgs(
-        chart="piraeus",
+        chart="oci://ghcr.io/piraeusdatastore/piraeus-operator/piraeus",
         version=_chart_deps["piraeus"]["version"],
         namespace="piraeus-datastore",
         create_namespace=True,
-        repository_opts=k8s.helm.v3.RepositoryOptsArgs(
-            repo=_chart_deps["piraeus"]["repository"],
-        ),
         values={
             "installCRDs": True,
         },
@@ -244,19 +238,14 @@ piraeus_operator = k8s.helm.v3.Release(
 )
 
 
-# PoC backing store is a file-thin pool on the root disk — the nodes have no
-# spare disks; switch to lvmThinPool + source.hostDevices if dedicated disks
-# are added to the VMs later.
+# Backing store is a file-thin pool on the root disk
 piraeus = k8s.helm.v3.Release(
     "linstor-cluster",
     k8s.helm.v3.ReleaseArgs(
-        chart="linstor-cluster",
+        chart="oci://ghcr.io/piraeusdatastore/helm-charts/linstor-cluster",
         version=_chart_deps["linstor-cluster"]["version"],
         namespace="piraeus-datastore",
         create_namespace=True,
-        repository_opts=k8s.helm.v3.RepositoryOptsArgs(
-            repo=_chart_deps["linstor-cluster"]["repository"],
-        ),
         values={
             "linstorSatelliteConfigurations": [
                 {
@@ -269,8 +258,7 @@ piraeus = k8s.helm.v3.Release(
                             },
                         },
                     ],
-                    # Flatcar: /usr is read-only and /usr/src does not exist,
-                    # so drop the DRBD loader's bind mount (piraeus Flatcar how-to).
+                    # piraeus Flatcar how-to
                     "podTemplate": {
                         "spec": {
                             "volumes": [
@@ -301,8 +289,6 @@ piraeus = k8s.helm.v3.Release(
                     "volumeBindingMode": "WaitForFirstConsumer",
                     "provisioner": "linstor.csi.linbit.com",
                     "parameters": {
-                        # Two replicas across the three nodes; a node without a
-                        # replica attaches diskless (allowRemoteVolumeAccess).
                         "linstor.csi.linbit.com/autoPlace": "2",
                         "linstor.csi.linbit.com/storagePool": "file-thin",
                         "linstor.csi.linbit.com/allowRemoteVolumeAccess": "true",
