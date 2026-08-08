@@ -20,6 +20,49 @@ with open(os.path.join(os.path.dirname(__file__), "Chart.yaml")) as f:
     _chart_deps = {d["name"]: d for d in yaml.safe_load(f)["dependencies"]}
 
 
+# Add the flatcar-specific SSL paths
+def _fix_suc_ssl_paths(
+    args: pulumi.ResourceTransformArgs,
+) -> Optional[pulumi.ResourceTransformResult]:
+    # Only touch the Deployment, leave other resources in the manifest alone
+    if args.type_ != "kubernetes:apps/v1:Deployment":
+        return None
+
+    props = args.props
+    template_spec = props["spec"]["template"]["spec"]
+
+    mounts = [
+        {"mountPath": "/usr/share/ssl", "name": "usr-share-ssl", "readOnly": True},
+        {
+            "mountPath": "/usr/share/ca-certificates",
+            "name": "usr-share-ca-certificates",
+            "readOnly": True,
+        },
+    ]
+    volumes = [
+        {
+            "hostPath": {"path": "/usr/share/ssl", "type": "DirectoryOrCreate"},
+            "name": "usr-share-ssl",
+        },
+        {
+            "hostPath": {"path": "/usr/share/ca-certificates", "type": "DirectoryOrCreate"},
+            "name": "usr-share-ca-certificates",
+        },
+    ]
+
+    for container in template_spec.get("containers", []):
+        existing = {m["name"] for m in container.get("volumeMounts", [])}
+        container.setdefault("volumeMounts", []).extend(
+            m for m in mounts if m["name"] not in existing
+        )
+    existing_volumes = {v["name"] for v in template_spec.get("volumes", [])}
+    template_spec.setdefault("volumes", []).extend(
+        v for v in volumes if v["name"] not in existing_volumes
+    )
+
+    return pulumi.ResourceTransformResult(props=props, opts=args.opts)
+
+
 suc_crd = k8s.yaml.v2.ConfigFile(
     "system-upgrade-controller-crd",
     file=f"https://github.com/rancher/system-upgrade-controller/releases/download/{SUC_VERSION}/crd.yaml",
@@ -30,6 +73,7 @@ suc = k8s.yaml.v2.ConfigFile(
     file=f"https://github.com/rancher/system-upgrade-controller/releases/download/{SUC_VERSION}/system-upgrade-controller.yaml",
     opts=pulumi.ResourceOptions(
         depends_on=[suc_crd],
+        transforms=[_fix_suc_ssl_paths],
     ),
 )
 
@@ -114,56 +158,6 @@ agent_plan = CustomResource(
     },
     opts=ResourceOptions(depends_on=[server_plan]),
 )
-
-# Add the flatcar-specific SSL paths
-suc_patch = k8s.apps.v1.DeploymentPatch(
-    "system-upgrade-controller-patch",
-    metadata=k8s.meta.v1.ObjectMetaPatchArgs(
-        name="system-upgrade-controller",
-        namespace="system-upgrade",
-    ),
-    spec=k8s.apps.v1.DeploymentSpecPatchArgs(
-        template=k8s.core.v1.PodTemplateSpecPatchArgs(
-            spec=k8s.core.v1.PodSpecPatchArgs(
-                containers=[
-                    k8s.core.v1.ContainerPatchArgs(
-                        name="system-upgrade-controller",
-                        volume_mounts=[
-                            k8s.core.v1.VolumeMountPatchArgs(
-                                mount_path="/usr/share/ssl",
-                                name="usr-share-ssl",
-                                read_only=True,
-                            ),
-                            k8s.core.v1.VolumeMountPatchArgs(
-                                mount_path="/usr/share/ca-certificates",
-                                name="usr-share-ca-certificates",
-                                read_only=True,
-                            ),
-                        ],
-                    )
-                ],
-                volumes=[
-                    k8s.core.v1.VolumePatchArgs(
-                        name="usr-share-ssl",
-                        host_path=k8s.core.v1.HostPathVolumeSourcePatchArgs(
-                            path="/usr/share/ssl",
-                            type="DirectoryOrCreate",
-                        ),
-                    ),
-                    k8s.core.v1.VolumePatchArgs(
-                        name="usr-share-ca-certificates",
-                        host_path=k8s.core.v1.HostPathVolumeSourcePatchArgs(
-                            path="/usr/share/ca-certificates",
-                            type="DirectoryOrCreate",
-                        ),
-                    ),
-                ],
-            )
-        )
-    ),
-    opts=pulumi.ResourceOptions(depends_on=[suc]),
-)
-
 
 # Kured reboots nodes when update-engine touches /run/reboot-required
 # chart defaults handle the sentinel path and control-plane taints.
