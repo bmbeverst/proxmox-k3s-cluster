@@ -1,0 +1,3 @@
+[submodule "flatcar/proxmox-flatcar"]
+	path = flatcar/proxmox-flatcar
+	url = git@github.com:bmbeverst/proxmox-flatcar.git

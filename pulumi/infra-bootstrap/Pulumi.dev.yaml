@@ -2,4 +2,4 @@ config:
   infra-bootstrap:pulumiAccessToken:
     secure: AAABAOe3OOxtuzDo2R/U0bhJ3Wj8ui/cv1cAWp6dVbp9/3D6aKIO3J/m9A7Uw1GQqeMQ/huIWu6DtEge6RjCMgPK3H1TzbRPrJe1fA==
   infra-bootstrap:gitlabAccessToken:
-    secure: AAABAAnbYvRNbf9eN6DpoQ5/Qq6Ri66QwIUCrq9bno1CvoddxCVVJEZQUk4EPuRLzaKsZXQU756dMw==
+    secure: AAABABWGZ79u/R8VlyXJi8nfZAcmM88k6B5KeixaRDiI9wXxnYHrtL7qKU1drFUUg4iEc6DneaDKaoj7v2fZG15mDyMNS00FDq/dhKXBuysEu/hXCiP7/gMLn/3IUQ==
