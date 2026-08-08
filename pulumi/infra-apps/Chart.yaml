@@ -10,6 +10,9 @@ dependencies:
   - name: kube-vip
     repository: https://kube-vip.github.io/helm-charts
     version: 0.11.0
+  - name: piraeus
+    repository: oci://ghcr.io/piraeusdatastore/piraeus-operator
+    version: 2.11.0
   - name: linstor-cluster
-    repository: https://piraeus.io/helm-charts
+    repository: oci://ghcr.io/piraeusdatastore/helm-charts
     version: 1.2.0

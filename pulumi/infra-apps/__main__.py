@@ -222,7 +222,28 @@ kube_vip = k8s.helm.v3.Release(
 )
 
 
-# Piraeus (LINSTOR) storage: operator, satellites, and CSI driver in one chart.
+# Piraeus operator first: its chart ships the piraeus.io/v1 CRDs
+# (installCRDs=true). The linstor-cluster chart below renders custom
+# resources and fails with "no matches for kind LinstorCluster" if the
+# CRDs are not registered yet.
+piraeus_operator = k8s.helm.v3.Release(
+    "piraeus-operator",
+    k8s.helm.v3.ReleaseArgs(
+        chart="piraeus",
+        version=_chart_deps["piraeus"]["version"],
+        namespace="piraeus-datastore",
+        create_namespace=True,
+        repository_opts=k8s.helm.v3.RepositoryOptsArgs(
+            repo=_chart_deps["piraeus"]["repository"],
+        ),
+        values={
+            "installCRDs": True,
+        },
+        timeout=600,
+    ),
+)
+
+
 # PoC backing store is a file-thin pool on the root disk — the nodes have no
 # spare disks; switch to lvmThinPool + source.hostDevices if dedicated disks
 # are added to the VMs later.
@@ -291,4 +312,5 @@ piraeus = k8s.helm.v3.Release(
         },
         timeout=600,
     ),
+    opts=pulumi.ResourceOptions(depends_on=[piraeus_operator]),
 )
