@@ -139,6 +139,11 @@ infra_apps = CustomResource(
         "workspaceTemplate": {
             "spec": {
                 "image": "pulumi/pulumi-python:latest",
+                # pulumi/pulumi-python runs as root without $USER set; the
+                # pulumi CLI (CGO_ENABLED=0) needs USER to resolve the home path.
+                "env": [
+                    {"name": "USER", "value": "root"},
+                ],
             },
         },
     },
