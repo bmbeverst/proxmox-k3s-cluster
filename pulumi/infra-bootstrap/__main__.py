@@ -143,7 +143,7 @@ infra_apps = CustomResource(
                 # pulumi CLI (CGO_ENABLED=0) needs USER to resolve the home path.
                 "env": [
                     {"name": "USER", "value": "root"},
-                    {"name": "HOME", "value": "/root"},
+                    {"name": "HOME", "value": "/share"},
                 ],
             },
         },
