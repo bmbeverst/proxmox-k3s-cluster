@@ -136,6 +136,11 @@ infra_apps = CustomResource(
         },
         "destroyOnFinalize": True,
         "refresh": True,
+        "workspaceTemplate": {
+            "spec": {
+                "image": "pulumi/pulumi-python:latest",
+            },
+        },
     },
     opts=ResourceOptions(depends_on=[pko]),
 )
