@@ -1,5 +1,5 @@
 name: proxmox-k3s-nodes
 runtime: python
-description: ${DESCRIPTION}
+description: A k3s cluster running on multiple Proxmox nodes.
 template:
   description: A k3s cluster running on multiple Proxmox nodes.

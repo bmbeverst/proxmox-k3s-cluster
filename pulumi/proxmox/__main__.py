@@ -1,169 +1,138 @@
-import pulumi_proxmoxve as proxmoxve
+from typing import TypedDict
+
+import os
+import pathlib
 
 import pulumi
+import pulumi_proxmoxve as proxmoxve
 
-template_id="TMPL-flatcar-current"
 
-# Create three nodes based on the template
-node1 = proxmoxve.vm.VirtualMachine(
-    "node1",
-    node_name="pve",
-    vm_id=105,
-    clone={
-        "vm_id": 9000,
-        "full": True,
-        "node_name": "pve"
-    },
-    memory={
-        "dedicated": 4096,
-        "balloon": 5120
-    },
-    agent={
-        "enabled": True
-    },
-    kvm_arguments="-fw_cfg name=opt/org.flatcar-linux/config,file=/etc/pve/flatcar/105.ign",
-    cpu={
-        "type": "host",
-        "cores": 2
-    },
-    hook_script_file_id="data_dir:snippets/hook-fcar.sh",
-    cdrom={
-        "enabled": True,
-        "media": "cdrom",
-        "volume": "data_dir:105/vm-105-cloudinit.qcow2"
-    },
-    network_devices=[
-        {
-            "bridge": "vmbr0",
-            "model": "virtio",
-        }
-    ],
-    initialization ={
-        "ip_configs": [{
-                "ipv4": {
-                    "ip": "10.10.1.51/24",
-                    "gateway": "10.10.1.1"
-                }
-            }],
-        "datastore_id": "data_dir"
-    },
-    on_boot=True,
-    disks=[
-        {
-            "interface": "scsi0",
-            "size": 16886,
-            "storage": "data_dir",
-            "volume": "105/vm-105-disk-0.qcow2"
-        }
-    ],
-)
+class NodeConfig(TypedDict):
+    name: str
+    vm_id: int
+    ip: str
 
-node2 = proxmoxve.vm.VirtualMachine(
-    "node2",
-    node_name="pve",
-    vm_id=106,
-    clone={
-        "vm_id": 9000,
-        "full": True,
-        "node_name": "pve"
-    },
-    memory={
-        "dedicated": 4096,
-        "balloon": 5120
-    },
-    agent={
-        "enabled": True
-    },
-    kvm_arguments="-fw_cfg name=opt/org.flatcar-linux/config,file=/etc/pve/flatcar/106.ign",
-    cpu={
-        "type": "host",
-        "cores": 2
-    },
-    hook_script_file_id="data_dir:snippets/hook-fcar.sh",
-    cdrom={
-        "enabled": True,
-        "media": "cdrom",
-        "volume": "data_dir:106/vm-106-cloudinit.qcow2"
-    },
-    network_devices=[
-        {
-            "bridge": "vmbr0",
-            "model": "virtio",
-        }
-    ],
-    initialization ={
-        "ip_configs": [{
-            "ipv4": {
-                "ip": "10.10.1.52/24",
-            "gateway": "10.10.1.1"
+
+# ---------------------------------------------------------------------------
+# Configuration — change values here, everything else follows.
+# ---------------------------------------------------------------------------
+NODES: list[NodeConfig] = [
+    {"name": "node1", "vm_id": 111, "ip": "10.10.1.111/24"},
+    {"name": "node2", "vm_id": 112, "ip": "10.10.1.112/24"},
+    {"name": "node3", "vm_id": 113, "ip": "10.10.1.113/24"},
+]
+
+TEMPLATE_VM_ID = 9002
+NODE_NAME = "pve"
+DATASTORE = "data"
+# Hook script lives in the `data_dir` datastore (snippets).
+HOOK_SCRIPT = "data_dir:snippets/hook-fcar.sh"
+# Flatcar config base dir used by the -fw_cfg ignition argument (host path).
+FLATCAR_IGN_BASE = "/etc/pve/flatcar"
+LINKED_CLONE = True
+ON_BOOT = False
+
+# Hardware / network defaults.
+CORES = 3
+MEMORY_MB = 7168   # 7 GiB dedicated (max); 3 nodes = 21 GiB on 31 GiB host
+MIN_MEMORY_MB = 2048
+BRIDGE = "vmbr0"
+GATEWAY = "10.10.1.1"
+
+# Username baked into the template (Flatcar default is `core`).
+CLOUDINIT_USER = "core"
+# SSH public key is read from this path at run time.
+SSH_KEY_PATH = os.path.expanduser("~/.ssh/id_rsa.pub")
+
+
+def _read_ssh_key() -> str:
+    try:
+        return pathlib.Path(SSH_KEY_PATH).read_text().strip()
+    except OSError as exc:
+        raise RuntimeError(
+            f"Could not read SSH public key from {SSH_KEY_PATH!r}: {exc}"
+        ) from exc
+
+
+ssh_public_key = _read_ssh_key()
+
+for node in NODES:
+    name = node["name"]
+    vm_id = node["vm_id"]
+    ip = node["ip"]
+
+    vm = proxmoxve.vm.VirtualMachine(
+        name,
+        node_name=NODE_NAME,
+        vm_id=vm_id,
+        name=name,
+        clone={
+            "vm_id": TEMPLATE_VM_ID,
+            "node_name": NODE_NAME,
+            "full": not LINKED_CLONE,
+            # `datastore_id` is only valid for FULL clones. PVE refuses it for
+            # linked clones, which inherit the template's datastore (9002 is
+            # on `data`), so we omit it when LINKED_CLONE is True.
+            **({"datastore_id": DATASTORE} if not LINKED_CLONE else {}),
+        },
+        agent={
+            "enabled": True,
+            "trim": True,  # fstrim_cloned_disks
+        },
+        cpu={
+            "type": "host",
+            "cores": CORES,
+        },
+        memory={
+            "dedicated": MEMORY_MB,
+            "floating": MIN_MEMORY_MB,
+        },
+        operating_system={
+            "type": "l26",
+        },
+        scsi_hardware="virtio-scsi-single",
+        kvm_arguments=(
+            f"-fw_cfg name=opt/org.flatcar-linux/config,"
+            f"file={FLATCAR_IGN_BASE}/{vm_id}.ign"
+        ),
+        hook_script_file_id=HOOK_SCRIPT,
+        network_devices=[
+            {
+                "bridge": BRIDGE,
+                "model": "virtio",
             }
-        }],
-        "datastore_id": "data_dir"
-    },
-    on_boot=True,
-    disks=[
-        {
-            "interface": "scsi0",
-            "size": 16886,
-            "storage": "data_dir",
-            "volume": "106/vm-106-disk-0.qcow2"
-        }
-    ],
-)
-
-node3 = proxmoxve.vm.VirtualMachine(
-    "node3",
-    node_name="pve",
-    vm_id=107,
-    clone={
-        "vm_id": 9000,
-        "full": True,
-        "node_name": "pve"
-    },
-    memory={
-        "dedicated": 4096,
-        "balloon": 5120
-    },
-    agent={
-        "enabled": True
-    },
-    kvm_arguments="-fw_cfg name=opt/org.flatcar-linux/config,file=/etc/pve/flatcar/107.ign",
-    cpu={
-        "type": "host",
-        "cores": 2
-    },
-    hook_script_file_id="data_dir:snippets/hook-fcar.sh",
-    cdrom={
-        "enabled": True,
-        "media": "cdrom",
-        "volume": "data_dir:107/vm-107-cloudinit.qcow2"
-    },
-    network_devices=[
-        {
-            "bridge": "vmbr0",
-            "model": "virtio",
-        }
-    ],
-    initialization ={
-        "ip_configs": [{
-                "ipv4": {
-                    "ip": "10.10.1.53/24",
-                    "gateway": "10.10.1.1"
+        ],
+        serial_devices=[
+            {
+                "device": "socket",
+            }
+        ],
+        vga={
+            "type": "serial0",
+        },
+        tablet_device=False,
+        on_boot=ON_BOOT,
+        initialization={
+            "datastore_id": DATASTORE,
+            "type": "nocloud",
+            "ip_configs": [
+                {
+                    "ipv4": {
+                        "address": ip,
+                        "gateway": GATEWAY,
+                    },
                 }
-            }],
-        "datastore_id": "data_dir"
-    },
-    on_boot=True,
-    disks=[
-        {
-            "interface": "scsi0",
-            "size": 16886,
-            "storage": "data_dir",
-            "volume": "107/vm-107-disk-0.qcow2"
-        }
-    ],
-)
+            ],
+            "user_account": {
+                "username": CLOUDINIT_USER,
+                "keys": [ssh_public_key],
+            },
+        },
+        # Ignore harmless current-state drift so updates don't try to "fix" it.
+        # Scoped carefully: memory is deliberately NOT ignored.
+        opts=pulumi.ResourceOptions(
+            # provider false-positives on running VMs (reports started=false, zeros MACs)
+            ignore_changes=["agent", "cdrom", "disks", "serialDevices", "vga", "started"]
+        ),
+    )
 
-pulumi.export("node1_public_ip", node1.networks[0].ip_address)
-pulumi.export("node2_public_ip", node2.networks[0].ip_address)
-pulumi.export("node3_public_ip", node3.networks[0].ip_address)
