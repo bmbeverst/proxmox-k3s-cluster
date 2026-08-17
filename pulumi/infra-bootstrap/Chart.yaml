@@ -1,0 +1,10 @@
+# Read by __main__.py for the PKO helm Release.
+# Helm v3 Chart.yaml so Renovate's built-in helmv3 manager bumps the
+# pulumi-kubernetes-operator chart version natively (mirrors infra-apps).
+apiVersion: v2
+name: infra-bootstrap
+version: 0.1.0
+dependencies:
+  - name: pulumi-kubernetes-operator
+    repository: oci://ghcr.io/pulumi/helm-charts
+    version: 2.0.0

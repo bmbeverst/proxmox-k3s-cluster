@@ -1,12 +1,26 @@
 """A Kubernetes Python Pulumi program to create a Kubernetes namespace and secret with PKO"""
 
+import os
+
+import yaml
+
 from pulumi_kubernetes import core, rbac
 from pulumi_kubernetes.apiextensions import CustomResource
 from pulumi_kubernetes.core.v1 import Namespace, Secret
-from pulumi_kubernetes.helm.v3 import Release, ReleaseArgs, RepositoryOptsArgs
+from pulumi_kubernetes.helm.v3 import Release, ReleaseArgs
 from pulumi_kubernetes.meta.v1 import ObjectMetaArgs
 
 from pulumi import Config, ResourceOptions
+
+# Chart repo/version live in Chart.yaml so Renovate's built-in helmv3 manager can
+# bump the PKO chart version (same pattern as infra-apps).
+with open(os.path.join(os.path.dirname(__file__), "Chart.yaml")) as f:
+    _chart_deps = {d["name"]: d for d in yaml.safe_load(f)["dependencies"]}
+_pko_chart = (
+    _chart_deps["pulumi-kubernetes-operator"]["repository"]
+    + "/"
+    + _chart_deps["pulumi-kubernetes-operator"]["name"]
+)
 
 # Create new Kubernetes Namespaces
 namespace = Namespace(
@@ -16,6 +30,10 @@ namespace = Namespace(
 namespace = Namespace(
     "infra-apps",
     metadata=ObjectMetaArgs(name="infra-apps"),
+)
+namespace = Namespace(
+    "my-apps",
+    metadata=ObjectMetaArgs(name="my-apps"),
 )
 
 # Get the Pulumi API token.
@@ -91,9 +109,9 @@ cluster_admin_binding = rbac.v1.ClusterRoleBinding(
 pko = Release(
     "pulumi-kubernetes-operator",
     ReleaseArgs(
-        chart="oci://ghcr.io/pulumi/helm-charts/pulumi-kubernetes-operator",
+        chart=_pko_chart,
         namespace="pulumi-kubernetes-operator",
-        version="2.0.0",
+        version=_chart_deps["pulumi-kubernetes-operator"]["version"],
         create_namespace=True,  # Optional: creates namespace if it doesn't exist
         timeout=600,
         atomic=True,  # Rollback on failure
@@ -151,39 +169,101 @@ infra_apps = CustomResource(
     opts=ResourceOptions(depends_on=[pko]),
 )
 
-# infra_bootstrap = CustomResource(
-#     "infra-bootstrap",
-#     metadata={
-#         "name": "infra-bootstrap",
-#         "namespace": "pulumi-kubernetes-operator",
-#     },
-#     api_version="pulumi.com/v1",
-#     kind="Stack",
-#     spec={
-#         "serviceAccountName": "pulumi",
-#         "envRefs": {
-#             "PULUMI_ACCESS_TOKEN": {
-#                 "type": "Secret",
-#                 "secret": {
-#                     "name": pulumi_api_key.metadata.name,
-#                     "key": "access_token",
-#                 },
-#             },
-#         },
-#         "stack": "bmbeverst/infra-bootstrap",
-#         "projectRepo": "https://gitlab.com/proxmox-k3s/proxmox-k3s-cluster.git",
-#         "repoDir": "pulumi/infra-bootstrap/",
-#         "branch": "main",
-#         "gitAuth": {
-#             "accessToken": {
-#                 "type": "Secret",
-#                 "secret": {
-#                     "name": gitlab_api_key.metadata.name,
-#                     "key": "access_token",
-#                 },
-#             },
-#         },
-#         "destroyOnFinalize": True,
-#     },
-#     opts=ResourceOptions(depends_on=[pko]),
-# )
+# PKO self-manages its own release
+infra_bootstrap = CustomResource(
+    "infra-bootstrap",
+    metadata={
+        "name": "infra-bootstrap",
+        "namespace": "pulumi-kubernetes-operator",
+    },
+    api_version="pulumi.com/v1",
+    kind="Stack",
+    spec={
+        "serviceAccountName": "pulumi",
+        "envRefs": {
+            "PULUMI_ACCESS_TOKEN": {
+                "type": "Secret",
+                "secret": {
+                    "name": pulumi_api_key.metadata.name,
+                    "key": "access_token",
+                },
+            },
+        },
+        "stack": "bmbeverst/infra-bootstrap/dev",
+        "projectRepo": "https://gitlab.com/proxmox-k3s/proxmox-k3s-cluster.git",
+        "repoDir": "pulumi/infra-bootstrap/",
+        "branch": "main",
+        "gitAuth": {
+            "accessToken": {
+                "type": "Secret",
+                "secret": {
+                    "name": gitlab_api_key.metadata.name,
+                    "key": "access_token",
+                },
+            },
+        },
+        "destroyOnFinalize": True,
+        "refresh": True,
+        "workspaceTemplate": {
+            "spec": {
+                "image": "pulumi/pulumi-python:latest",
+                # pulumi/pulumi-python runs as root without $USER set; the
+                # pulumi CLI (CGO_ENABLED=0) needs USER to resolve the home path.
+                "env": [
+                    {"name": "USER", "value": "root"},
+                    {"name": "HOME", "value": "/share"},
+                ],
+            },
+        },
+    },
+    opts=ResourceOptions(depends_on=[pko]),
+)
+
+# my-apps: user-facing apps, isolated from infra stacks.
+my_apps = CustomResource(
+    "my-apps",
+    metadata={
+        "name": "my-apps",
+        "namespace": "pulumi-kubernetes-operator",
+    },
+    api_version="pulumi.com/v1",
+    kind="Stack",
+    spec={
+        "serviceAccountName": "pulumi",
+        "envRefs": {
+            "PULUMI_ACCESS_TOKEN": {
+                "type": "Secret",
+                "secret": {
+                    "name": pulumi_api_key.metadata.name,
+                    "key": "access_token",
+                },
+            },
+        },
+        "stack": "bmbeverst/my-apps/dev",
+        "projectRepo": "https://gitlab.com/proxmox-k3s/proxmox-k3s-cluster.git",
+        "repoDir": "pulumi/my-apps/",
+        "branch": "main",
+        "gitAuth": {
+            "accessToken": {
+                "type": "Secret",
+                "secret": {
+                    "name": gitlab_api_key.metadata.name,
+                    "key": "access_token",
+                },
+            },
+        },
+        "destroyOnFinalize": True,
+        "refresh": True,
+        "workspaceTemplate": {
+            "spec": {
+                "image": "pulumi/pulumi-python:latest",
+                # Same USER/HOME workaround as infra-apps.
+                "env": [
+                    {"name": "USER", "value": "root"},
+                    {"name": "HOME", "value": "/share"},
+                ],
+            },
+        },
+    },
+    opts=ResourceOptions(depends_on=[pko]),
+)
