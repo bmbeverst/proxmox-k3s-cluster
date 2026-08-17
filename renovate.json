@@ -20,5 +20,8 @@
       "packageNameTemplate": "rancher/system-upgrade-controller",
       "datasourceTemplate": "github-releases"
     }
-  ]
+  ],
+  "docker": {
+    "fileMatch": ["/^pulumi\\/my-apps\\/__main__\\.py$/"]
+  }
 }
