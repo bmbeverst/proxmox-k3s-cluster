@@ -1,5 +1,0 @@
-name: proxmox-k3s-cluster
-runtime: python
-description: ${DESCRIPTION}
-template:
-  description: A k3s cluster running on multiple Proxmox nodes.

@@ -19,15 +19,16 @@ GHOST_IMAGE = "ghost:6.57.1-alpine"
 NAMESPACE = "my-apps"
 
 # One canonical URL for Ghost (redirects/admin/canonical links need a single
-# value). Reachable at http://<any-node-ip>:31680 too, but the kube-vip
-# control-plane VIP (10.10.1.99) is the *stable* address: its ARP-answering
-# node always has the NodePort bound, so it floats with leadership and keeps
-# working when any single node is down (NodePort is served by all nodes).
-# NOTE: kube-vip is cp_enable only (svc_enable=false) — not a service LB.
-# Real ingress/TLS (Traefik + Cloudflare, blog.lenatin.org) is a later pass.
-GHOST_VIP = "10.10.1.99"
+# value) that must be reachable from INSIDE the pod too: Ghost's homepage
+# probes assets at its own canonical `url` (image-size checks). A NodePort on a
+# NODE IP is reachable from both the browser and from pods (kube-proxy), whereas
+# the kube-vip control-plane VIP (10.10.1.99) was NOT reachable from pods and
+# made the homepage hang (crash loop). Node IP is a single-node weak point for
+# browser access — accepted for this no-ingress local pass; the durable fix is
+# the deferred Traefik/Cloudflare ingress. Any of the 3 nodes serves NodePort.
+GHOST_NODE_IP = "10.10.1.111"
 GHOST_NODE_PORT = "31680"
-GHOST_URL = f"http://{GHOST_VIP}:{GHOST_NODE_PORT}"
+GHOST_URL = f"http://{GHOST_NODE_IP}:{GHOST_NODE_PORT}"
 
 namespace = k8s.core.v1.Namespace(
     "my-apps",
@@ -89,9 +90,9 @@ ghost = k8s.apps.v1.Deployment(
                                 path="/",
                                 port=2368,
                             ),
-                            initial_delay_seconds=30,
-                            period_seconds=15,
-                            timeout_seconds=5,
+                            initial_delay_seconds=45,
+                            period_seconds=20,
+                            timeout_seconds=8,
                             failure_threshold=3,
                         ),
                         readiness_probe=k8s.core.v1.ProbeArgs(
@@ -99,9 +100,9 @@ ghost = k8s.apps.v1.Deployment(
                                 path="/",
                                 port=2368,
                             ),
-                            initial_delay_seconds=15,
-                            period_seconds=10,
-                            timeout_seconds=5,
+                            initial_delay_seconds=20,
+                            period_seconds=15,
+                            timeout_seconds=8,
                             failure_threshold=3,
                         ),
                         volume_mounts=[
