@@ -5,7 +5,7 @@ ssh_user = 'core'
 
 tls_san = "10.10.1.99"
 # Must match the init node IP in the inventory
-init_node_ip = "10.10.1.51"
+init_node_ip = "10.10.1.111"
 
 def readVaultToken():
     file_path = '.vault_pass'

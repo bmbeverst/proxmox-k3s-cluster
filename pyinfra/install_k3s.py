@@ -7,7 +7,7 @@ Skips the k3s install if already installed.
 
 from pyinfra import host
 from pyinfra.facts.files import Directory
-from pyinfra.operations import files, python, server, systemd
+from pyinfra.operations import files, server, systemd
 
 # Get TLS SAN from host info
 tls_san = host.data.get("tls_san")
@@ -16,20 +16,6 @@ k3s_token = host.data.get("k3s_token")
 
 # Check if this is the init node
 is_init_node = host.data.get("init_k3s", False)
-
-
-def wait_for_init_node(init_node_ip):
-    # Wait for init node to be reachable with retries
-    for attempt in range(3):
-        result = server.shell(
-            f'/usr/bin/curl --connect-timeout 10 --silent --show-error "{init_node_ip}":6443'
-        )
-        if result.did_succeed():
-            break
-        if attempt == 5:  # Last attempt
-            print(f"Error: Could not connect to init node at {init_node_ip}:6443")
-            print(f"Last error: {stderr}")
-            raise Exception(f"Failed to connect to init node after 3 attempts")
 
 
 # Check if k3s is already installed
@@ -41,7 +27,7 @@ else:
         server.shell(
             name="Install k3s on init node",
             commands=[
-                f'curl -sfL https://get.k3s.io | sh -s - --secrets-encryption --token "{k3s_token}" --tls-san "{tls_san}" --cluster-init'  # pylint: disable=line-too-long
+                f'curl -sfL https://get.k3s.io | INSTALL_K3S_SKIP_SELINUX_RPM=true sh -s - --secrets-encryption --token "{k3s_token}" --tls-san "{tls_san}" --cluster-init'  # pylint: disable=line-too-long
             ],
         )
 
@@ -65,16 +51,22 @@ else:
         # Get init node IP
         init_node_ip = host.data.get("init_node_ip")
 
-        python.call(
-            name="Wait for init node to respond",
-            function=wait_for_init_node,
-            init_node_ip=init_node_ip,
+        # Robust wait: poll https://<init>:6443 up to ~90s, exiting non-zero if it
+        # never comes up (so pyinfra genuinely fails instead of silently passing).
+        server.shell(
+            name="Wait for init node k3s API to be reachable",
+            commands=[
+                f'for i in $(seq 1 15); do '
+                f'if curl -sk --connect-timeout 2 -o /dev/null "https://{init_node_ip}:6443"; then '
+                f'exit 0; fi; sleep 2; done; '
+                f'echo "init node {init_node_ip}:6443 not reachable after ~30s" >&2; exit 1'
+            ],
         )
         # Install k3s on worker node
         server.shell(
             name="Install k3s on worker node",
             commands=[
-                f'curl -sfL https://get.k3s.io | sh -s - --secrets-encryption --token "{k3s_token}" --tls-san "{tls_san}" --server "https://{init_node_ip}:6443"'  # pylint: disable=line-too-long
+                f'curl -sfL https://get.k3s.io | INSTALL_K3S_SKIP_SELINUX_RPM=true sh -s - --secrets-encryption --token "{k3s_token}" --tls-san "{tls_san}" --server "https://{init_node_ip}:6443"'  # pylint: disable=line-too-long
             ],
             # _timeout=120, # This can be an issue due to GitHub throttling
         )
@@ -99,19 +91,7 @@ systemd.service(
     _sudo=True,
 )
 
-# Configure journald via a drop-in: Flatcar ships no stock
-# /etc/systemd/journald.conf, and the previous files.line approach created a
-# sectionless main file that journald rejects ("Assignment outside of
-# section. Ignoring." at every boot).
-files.directory(
-    name="Create journald.conf.d",
-    path="/etc/systemd/journald.conf.d",
-    mode="755",
-    user="root",
-    group="root",
-    _sudo=True,
-)
-
+# Configure journald via a drop-in
 journald_dropin = files.put(
     name="Set journald size caps via drop-in",
     src="files/journald-caps.conf",
