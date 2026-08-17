@@ -1,0 +1,10 @@
+name: my-apps
+description: User-facing applications deployed on the k3s cluster
+runtime:
+  name: python
+  options:
+    toolchain: uv
+config:
+  pulumi:tags:
+    value:
+      pulumi:template: kubernetes-python
