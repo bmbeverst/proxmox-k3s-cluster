@@ -34,8 +34,7 @@ ON_BOOT = False
 
 # Hardware / network defaults.
 CORES = 3
-MEMORY_MB = 7168   # 7 GiB dedicated (max); 3 nodes = 21 GiB on 31 GiB host
-MIN_MEMORY_MB = 2048
+MEMORY_MB = 7168   # 7 GiB; no floating = no balloon (non-ballooning)
 BRIDGE = "vmbr0"
 GATEWAY = "10.10.1.1"
 
@@ -85,12 +84,23 @@ for node in NODES:
         },
         memory={
             "dedicated": MEMORY_MB,
-            "floating": MIN_MEMORY_MB,
         },
         operating_system={
             "type": "l26",
         },
         scsi_hardware="virtio-scsi-single",
+        disks=[
+            {
+                "interface": "scsi0",
+                "datastore_id": DATASTORE,
+                "iothread": True,
+                "cache": "none",
+                "aio": "io_uring",
+                "discard": "ignore",
+                "ssd": False,
+                "size": 24,
+            },
+        ],
         kvm_arguments=(
             f"-fw_cfg name=opt/org.flatcar-linux/config,"
             f"file={FLATCAR_IGN_BASE}/{vm_id}.ign"
@@ -129,10 +139,8 @@ for node in NODES:
             },
         },
         # Ignore harmless current-state drift so updates don't try to "fix" it.
-        # Scoped carefully: memory is deliberately NOT ignored.
         opts=pulumi.ResourceOptions(
-            # provider false-positives on running VMs (reports started=false, zeros MACs)
-            ignore_changes=["agent", "cdrom", "disks", "serialDevices", "vga", "started"]
+            ignore_changes=["agent", "cdrom", "disks", "serialDevices", "vga", "started",
+                             "macAddresses", "networkInterfaceNames", "ipv4Addresses", "ipv6Addresses"]
         ),
     )
-

@@ -1,0 +1,8 @@
+config:
+  proxmoxve:endpoint:
+    secure: AAABABDKwt2oW+1tdJPSS2wJrB++DoseMhBcJejUbHGOUIUhxt/pnsvfo9+hafmS693Sg2jwuDUbsZZouQ==
+  proxmoxve:username:
+    secure: AAABAOqafVNqgCKnoGhIWZeJhN8qmmskQlIDXrrBoboWXPJnJlJbZ8P9
+  proxmoxve:insecure: "false"
+  proxmoxve:password:
+    secure: AAABABjPZa5jIix0K294vWp5MTVtwqgHfey9wDgZeXHLaIFzPLKBVI85Ua+sFLyqxBVp5ruQds0Fy+6yM9PT/ea5B24=
