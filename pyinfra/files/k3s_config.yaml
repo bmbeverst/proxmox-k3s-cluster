@@ -1,6 +1,9 @@
 kubelet-arg:
   - "image-gc-low-threshold=65"
   - "image-gc-high-threshold=75"
+  - "system-reserved=cpu=200m,memory=384Mi"
+  - "kube-reserved=cpu=300m,memory=640Mi"
+  - "eviction-hard=memory.available<300Mi"
 
 systemReserved:
   cpu: "100m" # Reserve 100 millicores for OS
