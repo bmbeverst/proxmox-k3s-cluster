@@ -300,3 +300,25 @@ piraeus = k8s.helm.v3.Release(
     ),
     opts=pulumi.ResourceOptions(depends_on=[piraeus_operator]),
 )
+
+# cert-manager issues TLS certs
+cert_manager = k8s.helm.v3.Release(
+    "cert-manager",
+    k8s.helm.v3.ReleaseArgs(
+        chart="cert-manager",
+        version=_chart_deps["cert-manager"]["version"],
+        namespace="cert-manager",
+        create_namespace=True,
+        repository_opts=k8s.helm.v3.RepositoryOptsArgs(
+            repo=_chart_deps["cert-manager"]["repository"],
+        ),
+        values={
+            "installCRDs": True,
+            "resources": {
+                "requests": {"cpu": "10m", "memory": "64Mi"},
+                "limits": {"cpu": "100m", "memory": "128Mi"},
+            },
+        },
+        timeout=600,
+    ),
+)

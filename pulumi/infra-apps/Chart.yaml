@@ -16,3 +16,6 @@ dependencies:
   - name: linstor-cluster
     repository: oci://ghcr.io/piraeusdatastore/helm-charts
     version: 1.2.0
+  - name: cert-manager
+    repository: https://charts.jetstack.io
+    version: 1.16.2
