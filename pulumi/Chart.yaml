@@ -1,6 +1,4 @@
-# Read by infra-apps/__main__.py and infra-bootstrap/__main__.py for all the
-# helm Releases (HTTP + OCI charts). Helm v3 Chart.yaml so Renovate's built-in
-# helmv3 manager bumps them natively.
+# Helm v3 Chart.yaml so Renovate's built-in helmv3 manager bumps them natively.
 apiVersion: v2
 name: infra-base
 version: 0.1.0
