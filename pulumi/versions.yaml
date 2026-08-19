@@ -1,0 +1,17 @@
+# This file centralizes all non-Helm dependency versions.
+#
+# Each value is preceded by a `# renovate:` comment consumed by the single
+# regex customManager in renovate.json (managerFilePatterns:
+# /pulumi/versions\.yaml$/). The comment plus the following YAML value pair
+# provide datasource, depName, and the currentValue, forwarded through
+# {{{...}}} templates.
+#
+# Helm chart versions (HTTP and OCI charts alike) live in
+# pulumi/Chart.yaml so Renovate's built-in helmv3 manager handles
+# them natively.
+
+# renovate: datasource=github-releases depName=rancher/system-upgrade-controller
+suc_version: v0.20.1
+
+# renovate: datasource=docker depName=ghost
+ghost_image_tag: 6.57.1-alpine

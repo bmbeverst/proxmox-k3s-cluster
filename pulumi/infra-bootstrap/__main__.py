@@ -12,9 +12,9 @@ from pulumi_kubernetes.meta.v1 import ObjectMetaArgs
 
 from pulumi import Config, ResourceOptions
 
-# Chart repo/version live in Chart.yaml so Renovate's built-in helmv3 manager can
-# bump the PKO chart version (same pattern as infra-apps).
-with open(os.path.join(os.path.dirname(__file__), "Chart.yaml")) as f:
+# Chart repo/version live in ../Chart.yaml so Renovate's built-in helmv3 manager
+# can bump the PKO chart version (the other charts live there too).
+with open(os.path.join(os.path.dirname(__file__), "..", "Chart.yaml")) as f:
     _chart_deps = {d["name"]: d for d in yaml.safe_load(f)["dependencies"]}
 _pko_chart = (
     _chart_deps["pulumi-kubernetes-operator"]["repository"]

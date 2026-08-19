@@ -8,13 +8,20 @@ Currently provides the Ghost blog:
 - Local + insecure access only (ClusterIP + NodePort, no ingress/TLS yet).
 """
 
+import os
+
+import yaml
+
 import pulumi
 import pulumi_kubernetes as k8s
 from pulumi_kubernetes.meta.v1 import ObjectMetaArgs
 
-# Full image ref kept as ONE literal so Renovate's built-in `docker` manager
-# (fileMatch in renovate.json) can bump the tag — no customManager needed.
-GHOST_IMAGE = "ghost:6.57.1-alpine"
+# Ghost image tag lives in ../versions.yaml, bumped by the single regex
+# customManager (docker datasource) in renovate.json — see that file.
+with open(os.path.join(os.path.dirname(__file__), "..", "versions.yaml")) as f:
+    _versions = yaml.safe_load(f)
+
+GHOST_IMAGE = f"ghost:{_versions['ghost_image_tag']}"
 
 NAMESPACE = "my-apps"
 

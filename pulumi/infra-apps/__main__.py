@@ -13,10 +13,17 @@ from pulumi_kubernetes.yaml.v2 import ConfigFile
 from pulumi import ResourceOptions
 
 
-SUC_VERSION = "v0.20.1"
+# The system-upgrade-controller release tag lives in ../versions.yaml (the only
+# non-Helm version there), bumped by Renovate's single regex customManager
+# (managerFilePatterns: /pulumi/versions\.yaml$/).
+with open(os.path.join(os.path.dirname(__file__), "..", "versions.yaml")) as f:
+    _versions = yaml.safe_load(f)
 
-# Chart repos/versions live in Chart.yaml so Renovate's helmv3 manager can bump them.
-with open(os.path.join(os.path.dirname(__file__), "Chart.yaml")) as f:
+SUC_VERSION = _versions["suc_version"]
+
+# All helm chart repos/versions (HTTP and OCI) live in ../Chart.yaml so
+# Renovate's built-in helmv3 manager can bump them natively.
+with open(os.path.join(os.path.dirname(__file__), "..", "Chart.yaml")) as f:
     _chart_deps = {d["name"]: d for d in yaml.safe_load(f)["dependencies"]}
 
 

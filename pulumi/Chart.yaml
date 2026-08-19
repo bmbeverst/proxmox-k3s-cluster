@@ -1,7 +1,8 @@
-# Read by __main__.py for the helm Releases
-# Helm v3 Chart.yaml so Renovate's built-in manages it natively.
+# Read by infra-apps/__main__.py and infra-bootstrap/__main__.py for all the
+# helm Releases (HTTP + OCI charts). Helm v3 Chart.yaml so Renovate's built-in
+# helmv3 manager bumps them natively.
 apiVersion: v2
-name: infra-apps
+name: infra-base
 version: 0.1.0
 dependencies:
   - name: kured
@@ -19,3 +20,6 @@ dependencies:
   - name: cert-manager
     repository: https://charts.jetstack.io
     version: v1.21.1
+  - name: pulumi-kubernetes-operator
+    repository: oci://ghcr.io/pulumi/helm-charts
+    version: 2.0.0
