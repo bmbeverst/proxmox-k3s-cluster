@@ -22,13 +22,6 @@ Prompts for the password twice.
 Mirrors the built-in `PVEVMUser` plus the datastore / SDN rights needed to
 linked-clone a VM and attach it to a network.
 
-Notes on the extra privileges:
-- `Datastore.AllocateSpace` — writing a new volume on `data` (the clone's disk and
-  the cloud-init drive) needs this, not just `Datastore.Allocate`.
-- `SDN.Use` — required to attach the VMs to `vmbr0`, which is defined as an
-  **SDN zone** (`localnetwork`). Without it PVE returns
-  `Permission check failed (/sdn/zones/localnetwork/vmbr0, SDN.Use)`.
-
 ```bash
 pveum role add Pulumi-VM --privs \
   "VM.Allocate VM.Audit VM.Backup VM.Clone VM.Console VM.Migrate \
@@ -67,7 +60,7 @@ pveum acl modify /storage/data_dir -user pulumi@pve -role Pulumi-VM
 From `pulumi/proxmox/`:
 
 ```bash
-pulumi config set proxmoxve:endpoint https://pve.lenatin.org:8006/
+pulumi config set proxmoxve:endpoint https://pvehostname:8006/
 pulumi config set --secret proxmoxve:username "pulumi@pve"
 pulumi config set --secret proxmoxve:password "<password from step 2>"
 pulumi config set proxmoxve:insecure false
