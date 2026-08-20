@@ -27,7 +27,7 @@ build:vints:
       changes:
         - pulumi/my-apps/containers/server/**
         - .gitlab/ci/containers.yml
-    - when: manual
+    - when: never
 
 build:vints-backup:
   stage: build
@@ -55,7 +55,7 @@ build:vints-backup:
       changes:
         - pulumi/my-apps/containers/backup/**
         - .gitlab/ci/containers.yml
-    - when: manual
+    - when: never
 
 # Container scanning
 container_scanning:
@@ -73,7 +73,7 @@ container_scanning:vints:
       changes:
         - pulumi/my-apps/containers/server/**
         - .gitlab/ci/containers.yml
-    - when: manual
+    - when: never
 
 container_scanning:vints-backup:
   extends: container_scanning
@@ -86,7 +86,7 @@ container_scanning:vints-backup:
       changes:
         - pulumi/my-apps/containers/backup/**
         - .gitlab/ci/containers.yml
-    - when: manual
+    - when: never
 
 
 # Smoke tests: boot each built image and assert it actually starts.
@@ -98,7 +98,7 @@ smoke:vints:
       changes:
         - pulumi/my-apps/containers/server/**
         - .gitlab/ci/containers.yml
-    - when: manual
+    - when: never
   script:
     - podman login -u "$CI_REGISTRY_USER" -p "$CI_REGISTRY_PASSWORD" "$CI_REGISTRY"
     - podman rm -f smoke-vints >/dev/null 2>&1 || true
@@ -157,7 +157,7 @@ smoke:vints-backup:
       changes:
         - pulumi/my-apps/containers/backup/**
         - .gitlab/ci/containers.yml
-    - when: manual
+    - when: never
   script:
     - podman login -u "$CI_REGISTRY_USER" -p "$CI_REGISTRY_PASSWORD" "$CI_REGISTRY"
     - |
