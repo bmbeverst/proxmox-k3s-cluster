@@ -187,6 +187,11 @@ def register(namespace, infra_deps):
                             image=VINTS_IMAGE,
                             command=["/entrypoints/start-vints.sh"],
                             env=_vints_env(),
+                            # Expose the server console via stdin/tty so that
+                            # `kubectl attach -it deploy/vints -c vints` reaches
+                            # the running server's interactive console.
+                            stdin=True,
+                            tty=True,
                             security_context=k8s.core.v1.SecurityContextArgs(
                                 run_as_non_root=True,
                                 allow_privilege_escalation=False,
