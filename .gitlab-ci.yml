@@ -45,30 +45,28 @@ renovate:
   only:
     - schedules
 # Build + push our custom images to GitLab Container Registry.
-# - Kaniko: builds without a privileged Docker daemon (works on non-privileged
-#   shared runners). Push auth is automatic via GitLab's CI_REGISTRY_* vars.
+# - Buildah: builds without a privileged Docker daemon (works on non-privileged
+#   runners). GitLab-endorsed, maintained successor to the now-unmaintained
+#   kaniko. Push auth is automatic via GitLab's CI_REGISTRY_USER/_PASSWORD.
 # - Only images are built here; the cluster pulls them (via an imagePullSecret
 #   that lives in the my-apps Pulumi stack).
-.build-kaniko: &build-kaniko
+.buildah: &buildah
   stage: build
-  image:
-    name: gcr.io/kaniko-project/executor:latest
-    entrypoint: [""]
-  before_script:
-    - mkdir -p /kaniko/.docker
-    # Kaniko (go-containerregistry) reads username/password directly from
-    # /kaniko/.docker/config.json; no base64 auth needed.
-    - 'printf "{\"auths\":{\"%s\":{\"username\":\"%s\",\"password\":\"%s\"}}}\n" "$CI_REGISTRY" "$CI_REGISTRY_USER" "$CI_REGISTRY_PASSWORD" > /kaniko/.docker/config.json'
+  image: quay.io/containers/buildah:stable
 
 build:vints-server:
-  <<: *build-kaniko
+  <<: *buildah
   script:
     - >
-      /kaniko/executor
-      --context "$CI_PROJECT_DIR/pulumi/my-apps/containers/server"
-      --dockerfile Dockerfile
-      --destination "$CI_REGISTRY_IMAGE/vints-server:latest"
+      buildah build --storage-driver=vfs --isolation=chroot
       --build-arg DOTNET_TAG="$DOTNET_TAG"
+      --tag "$CI_REGISTRY_IMAGE/vints-server:latest"
+      "$CI_PROJECT_DIR/pulumi/my-apps/containers/server"
+    - >
+      buildah push --storage-driver=vfs
+      --creds "$CI_REGISTRY_USER:$CI_REGISTRY_PASSWORD"
+      "$CI_REGISTRY_IMAGE/vints-server:latest"
+      "docker://$CI_REGISTRY_IMAGE/vints-server:latest"
   rules:
     - if: $CI_PIPELINE_SOURCE == "push"
       changes:
@@ -77,13 +75,17 @@ build:vints-server:
     - when: manual
 
 build:vints-backup:
-  <<: *build-kaniko
+  <<: *buildah
   script:
     - >
-      /kaniko/executor
-      --context "$CI_PROJECT_DIR/pulumi/my-apps/containers/backup"
-      --dockerfile Dockerfile
-      --destination "$CI_REGISTRY_IMAGE/vints-backup:latest"
+      buildah build --storage-driver=vfs --isolation=chroot
+      --tag "$CI_REGISTRY_IMAGE/vints-backup:latest"
+      "$CI_PROJECT_DIR/pulumi/my-apps/containers/backup"
+    - >
+      buildah push --storage-driver=vfs
+      --creds "$CI_REGISTRY_USER:$CI_REGISTRY_PASSWORD"
+      "$CI_REGISTRY_IMAGE/vints-backup:latest"
+      "docker://$CI_REGISTRY_IMAGE/vints-backup:latest"
   rules:
     - if: $CI_PIPELINE_SOURCE == "push"
       changes:
