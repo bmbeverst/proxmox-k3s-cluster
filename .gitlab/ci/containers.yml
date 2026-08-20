@@ -113,12 +113,17 @@ smoke:vints:
       D=$(mktemp -d)
       mkdir -p "$D/srv" "$D/data" "$D/config" "$D/tmp"
       : > "$D/config/mods.txt"
-      # 1) install server files
+      echo "VS_VERSION=$VS_VERSION TAG=$TAG"
+      # 1) install server files (output captured so failures are diagnosable)
       podman run --rm -u 0 \
         -e VS_VERSION="$VS_VERSION" -e DATA_PATH=/data -e PORT=42420 \
         -v "$D/srv":/serverfiles -v "$D/data":/data -v "$D/config":/config -v "$D/tmp":/tmp \
-        "$CI_REGISTRY_IMAGE/vints-server:$TAG" /entrypoints/install-vints.sh 2>&1 \
-        | grep -q "server ready" || die "install step failed"
+        "$CI_REGISTRY_IMAGE/vints-server:$TAG" /entrypoints/install-vints.sh \
+        > "$D/install.log" 2>&1 \
+        || { echo "--- install step failed (rc=$?) ---"; tail -60 "$D/install.log"; die "install step failed"; }
+      grep -q "server ready" "$D/install.log" \
+        || { echo "--- install output, no 'server ready' ---"; tail -60 "$D/install.log"; die "install produced no 'server ready'"; }
+      echo "install OK"
       # 2) generate config, then shrink the world so first boot reaches WorldReady fast
       podman run --rm -u 0 -e DATA_PATH=/data -e PORT=42420 \
         -v "$D/srv":/serverfiles -v "$D/data":/data \
