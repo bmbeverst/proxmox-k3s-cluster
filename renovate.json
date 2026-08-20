@@ -1,21 +1,33 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": ["config:recommended"],
+  "extends": [
+    "config:recommended"
+  ],
   "minimumReleaseAge": "7 days",
   "automerge": true,
   "platformAutomerge": true,
   "packageRules": [
     {
       "description": "Major bumps require manual review (never automerge); patch & minor automerge via the global automerge default",
-      "matchUpdateTypes": ["major"],
+      "matchUpdateTypes": [
+        "major"
+      ],
       "automerge": false
     },
     {
       "description": "Piraeus operator chart (infra-apps): OCI registry exposes no release timestamp, so use GitHub releases to satisfy minimumReleaseAge/automerge",
-      "matchManagers": ["helmv3"],
-      "matchDatasources": ["docker"],
-      "matchDepNames": ["piraeus"],
-      "matchFileNames": ["pulumi/Chart.yaml"],
+      "matchManagers": [
+        "helmv3"
+      ],
+      "matchDatasources": [
+        "docker"
+      ],
+      "matchDepNames": [
+        "piraeus"
+      ],
+      "matchFileNames": [
+        "pulumi/Chart.yaml"
+      ],
       "overrideDatasource": "github-releases",
       "overridePackageName": "piraeusdatastore/piraeus-operator",
       "extractVersion": "^v(?<version>\\d+\\.\\d+\\.\\d+)$",
@@ -23,10 +35,18 @@
     },
     {
       "description": "linstor-cluster chart (infra-apps): OCI registry exposes no release timestamp, so use GitHub releases to satisfy minimumReleaseAge/automerge",
-      "matchManagers": ["helmv3"],
-      "matchDatasources": ["docker"],
-      "matchDepNames": ["linstor-cluster"],
-      "matchFileNames": ["pulumi/Chart.yaml"],
+      "matchManagers": [
+        "helmv3"
+      ],
+      "matchDatasources": [
+        "docker"
+      ],
+      "matchDepNames": [
+        "linstor-cluster"
+      ],
+      "matchFileNames": [
+        "pulumi/Chart.yaml"
+      ],
       "overrideDatasource": "github-releases",
       "overridePackageName": "piraeusdatastore/helm-charts",
       "extractVersion": "^linstor-cluster-(?<version>\\d+\\.\\d+\\.\\d+)$",
@@ -34,10 +54,18 @@
     },
     {
       "description": "Pulumi Kubernetes operator chart (infra-bootstrap): use timestamped GitHub chart releases for Pulumi Operator",
-      "matchManagers": ["helmv3"],
-      "matchDatasources": ["docker"],
-      "matchDepNames": ["pulumi-kubernetes-operator"],
-      "matchFileNames": ["pulumi/Chart.yaml"],
+      "matchManagers": [
+        "helmv3"
+      ],
+      "matchDatasources": [
+        "docker"
+      ],
+      "matchDepNames": [
+        "pulumi-kubernetes-operator"
+      ],
+      "matchFileNames": [
+        "pulumi/Chart.yaml"
+      ],
       "overrideDatasource": "github-releases",
       "overridePackageName": "pulumi/pulumi-kubernetes-operator",
       "extractVersion": "^pulumi-kubernetes-operator-(?<version>\\d+\\.\\d+\\.\\d+)$",
@@ -47,18 +75,11 @@
   "customManagers": [
     {
       "customType": "regex",
-      "managerFilePatterns": ["/pulumi/versions\\.yaml$/"],
+      "managerFilePatterns": [
+        "/pulumi/versions\\.yaml$/"
+      ],
       "matchStrings": [
         "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)\\r?\\n\\s*[A-Za-z0-9_]+:\\s*[\"']?(?<currentValue>[^\\s\"']+)[\"']?"
-      ],
-      "datasourceTemplate": "{{{datasource}}}",
-      "depNameTemplate": "{{{depName}}}"
-    },
-    {
-      "customType": "regex",
-      "managerFilePatterns": ["/\\.gitlab-ci\\.yml$/"],
-      "matchStrings": [
-        "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)\\r?\\n\\s*[A-Za-z0-9_]+:\\s*[\\\"']?(?<currentValue>[^\\s\\\"']+)[\\\"']?"
       ],
       "datasourceTemplate": "{{{datasource}}}",
       "depNameTemplate": "{{{depName}}}"

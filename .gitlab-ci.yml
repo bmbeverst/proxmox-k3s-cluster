@@ -9,6 +9,7 @@ stages:
   - test # template security scans (semgrep-sast, secret_detection) default here
   - build # build + push our custom container images
   - scan # container scanning of the images we just built
+  - smoke # boot the built images and assert they actually start
   - maintenance
 
 # Only include the security scan templates in non-scheduled pipelines. This is
@@ -30,12 +31,6 @@ include:
 
 variables:
   SECRET_DETECTION_ENABLED: "true"
-  # THE ODD ONE OUT: all versions belong in pulumi/versions.yaml, EXCEPT this one.
-  # The .NET runtime tag is the sole BUILD-time version (the vints-server base
-  # image); it's pinned to the exact patch here so renovate bumps it monthly and CI
-  # rebuilds. Please keep every other versioned thing in versions.yaml, not here.
-  # renovate: datasource=docker depName=mcr.microsoft.com/dotnet/runtime
-  DOTNET_TAG: "10.0.11"
 
 # Automatically update dependencies via Renovate
 renovate:

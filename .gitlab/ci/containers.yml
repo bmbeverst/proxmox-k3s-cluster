@@ -1,48 +1,55 @@
 # Container build + scan jobs for the custom container images.
 # Included from the root .gitlab-ci.yml (`- local: .gitlab/ci/containers.yml`).
-#
-# The root pipeline only carries SAST / secret-detection / renovate and the single
-# odd-one-out DOTNET_TAG var; everything image-related lives here. The `build` and
-# `scan` stages and the Security/Container-Scanning template are defined in the
-# root file; this file just provides the jobs.
 
-# Build + push vints-server from the pinned build-time DOTNET_TAG.
 build:vints:
   stage: build
-  image: quay.io/containers/buildah:latest
+  image: quay.io/containers/buildah:v1.43.2-immutable
   script:
     - >
       buildah build --storage-driver=vfs --isolation=chroot
-      --build-arg DOTNET_TAG="$DOTNET_TAG"
-      --tag "$CI_REGISTRY_IMAGE/vints-server:latest" pulumi/my-apps/containers/server
+      --tag "$CI_REGISTRY_IMAGE/vints-server:latest"
+      --tag "$CI_REGISTRY_IMAGE/vints-server:$CI_COMMIT_SHORT_SHA"
+      pulumi/my-apps/containers/server
     - >
       buildah push --storage-driver=vfs
       --creds "$CI_REGISTRY_USER:$CI_REGISTRY_PASSWORD"
       "$CI_REGISTRY_IMAGE/vints-server:latest"
       "docker://$CI_REGISTRY_IMAGE/vints-server:latest"
+    - |
+      if [ -n "$CI_COMMIT_SHORT_SHA" ]; then
+        buildah push --storage-driver=vfs \
+          --creds "$CI_REGISTRY_USER:$CI_REGISTRY_PASSWORD" \
+          "$CI_REGISTRY_IMAGE/vints-server:$CI_COMMIT_SHORT_SHA" \
+          "docker://$CI_REGISTRY_IMAGE/vints-server:$CI_COMMIT_SHORT_SHA"
+      fi
   rules:
     - if: $CI_PIPELINE_SOURCE == "push"
       changes:
         - pulumi/my-apps/containers/server/**
         - .gitlab/ci/containers.yml
-        # Rebuild when the build-time .NET tag changes (renovate edits .gitlab-ci.yml).
-        - .gitlab-ci.yml
     - when: manual
 
-# vints-backup is fully independent: no build-time version inputs, so it is built
-# only when its own sources change (never on version / .NET bump).
 build:vints-backup:
   stage: build
-  image: quay.io/containers/buildah:latest
+  image: quay.io/containers/buildah:v1.43.2-immutable
   script:
     - >
       buildah build --storage-driver=vfs --isolation=chroot
-      --tag "$CI_REGISTRY_IMAGE/vints-backup:latest" pulumi/my-apps/containers/backup
+      --tag "$CI_REGISTRY_IMAGE/vints-backup:latest"
+      --tag "$CI_REGISTRY_IMAGE/vints-backup:$CI_COMMIT_SHORT_SHA"
+      pulumi/my-apps/containers/backup
     - >
       buildah push --storage-driver=vfs
       --creds "$CI_REGISTRY_USER:$CI_REGISTRY_PASSWORD"
       "$CI_REGISTRY_IMAGE/vints-backup:latest"
       "docker://$CI_REGISTRY_IMAGE/vints-backup:latest"
+    - |
+      if [ -n "$CI_COMMIT_SHORT_SHA" ]; then
+        buildah push --storage-driver=vfs \
+          --creds "$CI_REGISTRY_USER:$CI_REGISTRY_PASSWORD" \
+          "$CI_REGISTRY_IMAGE/vints-backup:$CI_COMMIT_SHORT_SHA" \
+          "docker://$CI_REGISTRY_IMAGE/vints-backup:$CI_COMMIT_SHORT_SHA"
+      fi
   rules:
     - if: $CI_PIPELINE_SOURCE == "push"
       changes:
@@ -50,10 +57,7 @@ build:vints-backup:
         - .gitlab/ci/containers.yml
     - when: manual
 
-# Container scanning: one separate (non-matrix) scan job per image (each extends the
-# Security/Container-Scanning template job). Disable the template's default job, then
-# add one scan per image so the server rescans on a .NET bump while the backup scans
-# only when its own sources change.
+# Container scanning
 container_scanning:
   rules:
     - when: never
@@ -69,8 +73,6 @@ container_scanning:vints:
       changes:
         - pulumi/my-apps/containers/server/**
         - .gitlab/ci/containers.yml
-        # Rescan when the build-time .NET tag bumps (renovate edits .gitlab-ci.yml).
-        - .gitlab-ci.yml
     - when: manual
 
 container_scanning:vints-backup:
@@ -85,3 +87,85 @@ container_scanning:vints-backup:
         - pulumi/my-apps/containers/backup/**
         - .gitlab/ci/containers.yml
     - when: manual
+
+
+# Smoke tests: boot each built image and assert it actually starts.
+smoke:vints:
+  stage: smoke
+  image: quay.io/containers/podman:v5.8.4-immutable
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "push"
+      changes:
+        - pulumi/my-apps/containers/server/**
+        - .gitlab/ci/containers.yml
+    - when: manual
+  script:
+    - podman login -u "$CI_REGISTRY_USER" -p "$CI_REGISTRY_PASSWORD" "$CI_REGISTRY"
+    - podman rm -f smoke-vints >/dev/null 2>&1 || true
+    - |
+      set -e
+      die() { echo "smoke FAILED: $1"; podman logs smoke-vints 2>/dev/null || true; podman rm -f smoke-vints >/dev/null 2>&1 || true; exit 1; }
+      TAG=latest; [ -n "$CI_COMMIT_SHORT_SHA" ] && TAG="$CI_COMMIT_SHORT_SHA"
+      # The image intentionally does NOT bake the server in; the init container runs
+      # install-vints.sh to download it. Replicate that. Needs egress to
+      # api/cdn.vintagestory.at from the runner.
+      VS_VERSION=$(grep '^vintagestory_version:' pulumi/versions.yaml | awk '{print $2}')
+      D=$(mktemp -d)
+      mkdir -p "$D/srv" "$D/data" "$D/config" "$D/tmp"
+      : > "$D/config/mods.txt"
+      # 1) install server files
+      podman run --rm -u 0 \
+        -e VS_VERSION="$VS_VERSION" -e DATA_PATH=/data -e PORT=42420 \
+        -v "$D/srv":/serverfiles -v "$D/data":/data -v "$D/config":/config -v "$D/tmp":/tmp \
+        "$CI_REGISTRY_IMAGE/vints-server:$TAG" /entrypoints/install-vints.sh 2>&1 \
+        | grep -q "server ready" || die "install step failed"
+      # 2) generate config, then shrink the world so first boot reaches WorldReady fast
+      podman run --rm -u 0 -e DATA_PATH=/data -e PORT=42420 \
+        -v "$D/srv":/serverfiles -v "$D/data":/data \
+        "$CI_REGISTRY_IMAGE/vints-server:$TAG" \
+        /bin/sh -c 'cd /serverfiles && ./VintagestoryServer --dataPath /data --genconfig >/dev/null 2>&1' \
+        || die "genconfig step failed"
+      sed -i 's/"MapSizeX": [0-9][0-9]*/"MapSizeX": 512/; s/"MapSizeY": [0-9][0-9]*/"MapSizeY": 128/; s/"MapSizeZ": [0-9][0-9]*/"MapSizeZ": 512/' "$D/data/serverconfig.json"
+      # 3) boot and assert: stays up, reaches WorldReady, and does NOT NRE
+      podman run -d --name smoke-vints -u 0 \
+        -e DATA_PATH=/data -e PORT=42420 \
+        -v "$D/srv":/serverfiles -v "$D/data":/data \
+        "$CI_REGISTRY_IMAGE/vints-server:$TAG" /entrypoints/start-vints.sh \
+        || die "could not start server container"
+      ok=""
+      for i in $(seq 1 20); do
+        [ "$(podman inspect -f '{{.State.Running}}' smoke-vints 2>/dev/null || echo false)" = "true" ] && { ok=1; break; }
+        sleep 2
+      done
+      [ -n "$ok" ] || die "server process not running (crashed on boot)"
+      podman logs smoke-vints 2>&1 | grep -q 'WorldReady' || die "'WorldReady' never reached"
+      if podman logs smoke-vints 2>&1 | grep -qi 'NullReferenceException'; then die "NullReferenceException detected"; fi
+      echo "server smoke OK"
+    - podman rm -f smoke-vints >/dev/null 2>&1 || true
+
+smoke:vints-backup:
+  stage: smoke
+  image: quay.io/containers/podman:v5.8.4-immutable
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "push"
+      changes:
+        - pulumi/my-apps/containers/backup/**
+        - .gitlab/ci/containers.yml
+    - when: manual
+  script:
+    - podman login -u "$CI_REGISTRY_USER" -p "$CI_REGISTRY_PASSWORD" "$CI_REGISTRY"
+    - |
+      set -e
+      TAG=latest
+      [ -n "$CI_COMMIT_SHORT_SHA" ] && TAG="$CI_COMMIT_SHORT_SHA"
+      D=$(mktemp -d)
+      mkdir -p "$D/data/Saves" "$D/dest" "$D/tmp"
+      printf 'world' > "$D/data/Saves/seed.vcdbs"
+      podman run --rm -u 0 \
+        -e DATA_PATH=/data -e BACKUP_DEST=/backups \
+        -v "$D/data":/data -v "$D/dest":/backups -v "$D/tmp":/tmp \
+        "$CI_REGISTRY_IMAGE/vints-backup:$TAG" \
+        || { echo "backup smoke FAILED: non-zero exit"; exit 1; }
+      ls "$D/dest"/saves-*.tar.gz >/dev/null 2>&1 \
+        || { echo "backup smoke FAILED: no tar produced"; exit 1; }
+      echo "backup smoke OK"
