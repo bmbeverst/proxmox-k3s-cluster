@@ -37,8 +37,12 @@ NAMESPACE = "ghost"
 # made the homepage hang (crash loop). Node IP is a single-node weak point for
 # browser access — accepted for this no-ingress local pass; the durable fix is
 # the deferred Traefik/Cloudflare ingress. Any of the 3 nodes serves NodePort.
-GHOST_NODE_IP = "10.10.1.111"
-GHOST_NODE_PORT = "31680"
+# Ghost is pinned to node3 (10.10.1.113) — where it currently runs — and served on
+# NodePort 31681. Port 31680 is still held by the legacy pre-migration my-apps/ghost
+# Service, so we renumber to a free port rather than collide with it.
+GHOST_NODE = "node3"
+GHOST_NODE_IP = "10.10.1.113"
+GHOST_NODE_PORT = "31681"
 GHOST_URL = f"http://{GHOST_NODE_IP}:{GHOST_NODE_PORT}"
 
 
@@ -129,6 +133,7 @@ def register(namespace, infra_deps):
                             ],
                         ),
                     ],
+                    node_selector={"kubernetes.io/hostname": GHOST_NODE},
                     volumes=[
                         k8s.core.v1.VolumeArgs(
                             name="ghost-content",
@@ -155,7 +160,7 @@ def register(namespace, infra_deps):
                     name="http",
                     port=2368,
                     target_port=2368,
-                    node_port=31680,
+                    node_port=31681,
                 ),
             ],
         ),
