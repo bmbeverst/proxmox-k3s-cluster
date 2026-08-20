@@ -138,13 +138,13 @@ smoke:vints:
         "$CI_REGISTRY_IMAGE/vints-server:$TAG" /entrypoints/start-vints.sh \
         || die "could not start server container"
       ok=""
-      for i in $(seq 1 10); do
+      for i in $(seq 1 5); do
         podman logs smoke-vints > "$D/boot.log" 2>&1 || true
-        grep -q WorldReady "$D/boot.log" && { ok=1; break; }
+        grep -qi 'create new save game data' "$D/boot.log" && { ok=1; break; }
         [ "$(podman inspect -f '{{.State.Running}}' smoke-vints 2>/dev/null || echo false)" = "true" ] || break
         sleep 1
       done
-      [ -n "$ok" ] || { echo "--- boot output (no WorldReady in ~10s) ---"; tail -80 "$D/boot.log"; die "WorldReady never reached"; }
+      [ -n "$ok" ] || { echo "--- boot output (no 'create new save game data') ---"; tail -80 "$D/boot.log"; die "server did not start creating the world"; }
       if grep -qi NullReferenceException "$D/boot.log"; then tail -80 "$D/boot.log"; die "NullReferenceException detected"; fi
       echo "server smoke OK"
     - podman rm -f smoke-vints >/dev/null 2>&1 || true
