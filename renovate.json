@@ -53,6 +53,27 @@
       ],
       "datasourceTemplate": "{{{datasource}}}",
       "depNameTemplate": "{{{depName}}}"
+    },
+    {
+      "customType": "regex",
+      "managerFilePatterns": ["/\\.gitlab-ci\\.yml$/"],
+      "matchStrings": [
+        "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)\\r?\\n\\s*[A-Za-z0-9_]+:\\s*[\\\"']?(?<currentValue>[^\\s\\\"']+)[\\\"']?"
+      ],
+      "datasourceTemplate": "{{{datasource}}}",
+      "depNameTemplate": "{{{depName}}}"
     }
-  ]
+  ],
+  "customDatasources": {
+    "custom-vintagestory": {
+      "format": "json",
+      "registryUrlTemplates": [
+        "http://api.vintagestory.at/stable-unstable.json"
+      ],
+      "transformTemplates": [
+        "{{#each keys}} {{this}}\n{{/each}}"
+      ],
+      "versioning": "semver-coerced"
+    }
+  }
 }

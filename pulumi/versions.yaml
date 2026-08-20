@@ -7,3 +7,6 @@ suc_version: v0.20.1
 
 # renovate: datasource=docker depName=ghost
 ghost_image_tag: 6.57.1-alpine
+
+# renovate: datasource=custom.custom-vintagestory depName=vintagestory
+vintagestory_version: 1.22.7

@@ -28,9 +28,12 @@ include:
 
 variables:
   SECRET_DETECTION_ENABLED: "true"
-  # Must match dotnet_runtime_tag in pulumi/versions.yaml (the .NET 10 runtime is
-  # a documented Vintage Story server dependency). Passed to the server Dockerfile ARG.
-  DOTNET_TAG: "10.0"
+  # THE ODD ONE OUT: all versions belong in pulumi/versions.yaml, EXCEPT this one.
+  # The .NET runtime tag is the sole BUILD-time version (the vints-server base
+  # image); it's pinned to the exact patch here so renovate bumps it monthly and CI
+  # rebuilds. Please keep every other versioned thing in versions.yaml, not here.
+  # renovate: datasource=docker depName=mcr.microsoft.com/dotnet/runtime
+  DOTNET_TAG: "10.0.11"
 
 # Automatically update dependencies via Renovate
 renovate:
@@ -48,49 +51,80 @@ renovate:
     - schedules
 
 # Build + push our custom images to GitLab Container Registry.
+#
+# vints-server is built from the pinned DOTNET_TAG (the build-time base image).
+# It rebuilds on server source changes OR on a CI change (renovate bumps the
+# DOTNET_TAG var, which lives here as the odd-one-out version).
 build:vints:
   stage: build
   image: quay.io/containers/buildah:latest
-  parallel:
-    matrix:
-      - IMAGE: vints-server
-        CONTEXT: pulumi/my-apps/containers/server
-        EXTRA_ARGS: "--build-arg DOTNET_TAG=$DOTNET_TAG"
-      - IMAGE: vints-backup
-        CONTEXT: pulumi/my-apps/containers/backup
-        EXTRA_ARGS: ""
   script:
     - >
       buildah build --storage-driver=vfs --isolation=chroot
-      $EXTRA_ARGS
-      --tag "$CI_REGISTRY_IMAGE/$IMAGE:latest" "$CONTEXT"
+      --build-arg DOTNET_TAG="$DOTNET_TAG"
+      --tag "$CI_REGISTRY_IMAGE/vints-server:latest" pulumi/my-apps/containers/server
     - >
       buildah push --storage-driver=vfs
       --creds "$CI_REGISTRY_USER:$CI_REGISTRY_PASSWORD"
-      "$CI_REGISTRY_IMAGE/$IMAGE:latest"
-      "docker://$CI_REGISTRY_IMAGE/$IMAGE:latest"
+      "$CI_REGISTRY_IMAGE/vints-server:latest"
+      "docker://$CI_REGISTRY_IMAGE/vints-server:latest"
   rules:
     - if: $CI_PIPELINE_SOURCE == "push"
       changes:
         - pulumi/my-apps/containers/server/**
+        # Rebuild when the build-time .NET tag changes (renovate bumps it above).
+        - .gitlab-ci.yml
+    - when: manual
+
+# vints-backup is fully independent: no build-time version inputs, so it is built
+# only when its own sources change (never on version / .NET bumps).
+build:vints-backup:
+  stage: build
+  image: quay.io/containers/buildah:latest
+  script:
+    - >
+      buildah build --storage-driver=vfs --isolation=chroot
+      --tag "$CI_REGISTRY_IMAGE/vints-backup:latest" pulumi/my-apps/containers/backup
+    - >
+      buildah push --storage-driver=vfs
+      --creds "$CI_REGISTRY_USER:$CI_REGISTRY_PASSWORD"
+      "$CI_REGISTRY_IMAGE/vints-backup:latest"
+      "docker://$CI_REGISTRY_IMAGE/vints-backup:latest"
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "push"
+      changes:
         - pulumi/my-apps/containers/backup/**
     - when: manual
 
-# Scan both images we just built.
+# Container scanning: disable the template's default job (it scans an arbitrary
+# image on every pipeline) and define one scanner per image so each runs next to
+# its own build trigger. vints-server rescans when the .NET tag bumps;
+# vints-backup scans only when its own sources change.
 container_scanning:
+  rules:
+    - when: never
+
+container_scanning:vints:
+  extends: container_scanning
   stage: scan
-  parallel:
-    matrix:
-      - IMAGE: vints-server
-        DOCKERFILE: pulumi/my-apps/containers/server/Dockerfile
-      - IMAGE: vints-backup
-        DOCKERFILE: pulumi/my-apps/containers/backup/Dockerfile
   variables:
-    CS_IMAGE: "$CI_REGISTRY_IMAGE/$IMAGE:latest"
-    CS_DOCKERFILE_PATH: "$DOCKERFILE"
+    CS_IMAGE: "$CI_REGISTRY_IMAGE/vints-server:latest"
+    CS_DOCKERFILE_PATH: "pulumi/my-apps/containers/server/Dockerfile"
   rules:
     - if: $CI_PIPELINE_SOURCE == "push"
       changes:
         - pulumi/my-apps/containers/server/**
+        - .gitlab-ci.yml
+    - when: manual
+
+container_scanning:vints-backup:
+  extends: container_scanning
+  stage: scan
+  variables:
+    CS_IMAGE: "$CI_REGISTRY_IMAGE/vints-backup:latest"
+    CS_DOCKERFILE_PATH: "pulumi/my-apps/containers/backup/Dockerfile"
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "push"
+      changes:
         - pulumi/my-apps/containers/backup/**
     - when: manual
