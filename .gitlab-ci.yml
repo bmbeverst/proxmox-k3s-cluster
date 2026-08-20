@@ -96,10 +96,9 @@ build:vints-backup:
         - pulumi/my-apps/containers/backup/**
     - when: manual
 
-# Container scanning: disable the template's default job (it scans an arbitrary
-# image on every pipeline) and define one scanner per image so each runs next to
-# its own build trigger. vints-server rescans when the .NET tag bumps;
-# vints-backup scans only when its own sources change.
+# Container scanning: one separate (non-matrix) scan job per image, each pointing
+# at its own image + Dockerfile. Discrete jobs so the server rescans on a .NET bump
+# while the backup scans only when its own sources change.
 container_scanning:
   rules:
     - when: never
@@ -114,6 +113,7 @@ container_scanning:vints:
     - if: $CI_PIPELINE_SOURCE == "push"
       changes:
         - pulumi/my-apps/containers/server/**
+        # Rescan when the build-time .NET tag bumps (renovate edits .gitlab-ci.yml).
         - .gitlab-ci.yml
     - when: manual
 
