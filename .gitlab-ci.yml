@@ -46,70 +46,51 @@ renovate:
     - renovate
   only:
     - schedules
+
 # Build + push our custom images to GitLab Container Registry.
-# - Buildah: builds without a privileged Docker daemon (works on non-privileged
-#   runners). GitLab-endorsed, maintained successor to the now-unmaintained
-#   kaniko. Push auth is automatic via GitLab's CI_REGISTRY_USER/_PASSWORD.
-# - Only images are built here; the cluster pulls them (via an imagePullSecret
-#   that lives in the my-apps Pulumi stack).
-.buildah: &buildah
+build:vints:
   stage: build
   image: quay.io/containers/buildah:latest
-
-build:vints-server:
-  <<: *buildah
+  parallel:
+    matrix:
+      - IMAGE: vints-server
+        CONTEXT: pulumi/my-apps/containers/server
+        EXTRA_ARGS: "--build-arg DOTNET_TAG=$DOTNET_TAG"
+      - IMAGE: vints-backup
+        CONTEXT: pulumi/my-apps/containers/backup
+        EXTRA_ARGS: ""
   script:
     - >
       buildah build --storage-driver=vfs --isolation=chroot
-      --build-arg DOTNET_TAG="$DOTNET_TAG"
-      --tag "$CI_REGISTRY_IMAGE/vints-server:latest"
-      "$CI_PROJECT_DIR/pulumi/my-apps/containers/server"
+      $EXTRA_ARGS
+      --tag "$CI_REGISTRY_IMAGE/$IMAGE:latest" "$CONTEXT"
     - >
       buildah push --storage-driver=vfs
       --creds "$CI_REGISTRY_USER:$CI_REGISTRY_PASSWORD"
-      "$CI_REGISTRY_IMAGE/vints-server:latest"
-      "docker://$CI_REGISTRY_IMAGE/vints-server:latest"
+      "$CI_REGISTRY_IMAGE/$IMAGE:latest"
+      "docker://$CI_REGISTRY_IMAGE/$IMAGE:latest"
   rules:
     - if: $CI_PIPELINE_SOURCE == "push"
       changes:
         - pulumi/my-apps/containers/server/**
-        - pulumi/versions.yaml
-    - when: manual
-
-build:vints-backup:
-  <<: *buildah
-  script:
-    - >
-      buildah build --storage-driver=vfs --isolation=chroot
-      --tag "$CI_REGISTRY_IMAGE/vints-backup:latest"
-      "$CI_PROJECT_DIR/pulumi/my-apps/containers/backup"
-    - >
-      buildah push --storage-driver=vfs
-      --creds "$CI_REGISTRY_USER:$CI_REGISTRY_PASSWORD"
-      "$CI_REGISTRY_IMAGE/vints-backup:latest"
-      "docker://$CI_REGISTRY_IMAGE/vints-backup:latest"
-  rules:
-    - if: $CI_PIPELINE_SOURCE == "push"
-      changes:
         - pulumi/my-apps/containers/backup/**
     - when: manual
 
-# Scan both images we just built. Runs in its own stage AFTER build (stage
-# ordering guarantees the images exist). The analyzer pulls them from the
-# GitLab registry using the auto-injected CI_REGISTRY_USER/_PASSWORD.
-# NOTE: the Container-Scanning template spins up a Docker-in-Docker service,
-# which needs the runner to run in privileged mode. If this fails on a shared
-# runner, we'll drop it or switch to a Trivy-only job.
+# Scan both images we just built.
 container_scanning:
   stage: scan
+  parallel:
+    matrix:
+      - IMAGE: vints-server
+        DOCKERFILE: pulumi/my-apps/containers/server/Dockerfile
+      - IMAGE: vints-backup
+        DOCKERFILE: pulumi/my-apps/containers/backup/Dockerfile
   variables:
-    CS_IMAGE: "$CI_REGISTRY_IMAGE/vints-server:latest,$CI_REGISTRY_IMAGE/vints-backup:latest"
-    CS_DOCKERFILE_PATH: "pulumi/my-apps/containers/server/Dockerfile"
+    CS_IMAGE: "$CI_REGISTRY_IMAGE/$IMAGE:latest"
+    CS_DOCKERFILE_PATH: "$DOCKERFILE"
   rules:
     - if: $CI_PIPELINE_SOURCE == "push"
       changes:
         - pulumi/my-apps/containers/server/**
         - pulumi/my-apps/containers/backup/**
-        - pulumi/versions.yaml
     - when: manual
-
