@@ -1,1 +1,1 @@
-config: {}
+config: {'my-apps:vintsRegistryReadUser': gitlab+deploy-token-15218631, 'my-apps:vintsRegistryReadToken': {secure: AAABANAxKeKaMPAcFDAmwKriexAn6ldD+gGCiDCNVHQUzKnHx0ItgXcXY3ys8jTgNlwsmB+S83VQ}, 'my-apps:vintsRegistry': registry.gitlab.com/proxmox-k3s/proxmox-k3s-cluster}
