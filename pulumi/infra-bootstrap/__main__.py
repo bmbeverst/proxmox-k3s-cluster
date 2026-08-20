@@ -1,11 +1,13 @@
 """A Kubernetes Python Pulumi program to create a Kubernetes namespace and secret with PKO"""
 
 import os
+import urllib.request
 
 import yaml
 
 from pulumi_kubernetes import core, rbac
 from pulumi_kubernetes.apiextensions import CustomResource
+from pulumi_kubernetes.apiextensions.v1 import CustomResourceDefinition
 from pulumi_kubernetes.core.v1 import Namespace, Secret
 from pulumi_kubernetes.helm.v3 import Release, ReleaseArgs
 from pulumi_kubernetes.meta.v1 import ObjectMetaArgs
@@ -21,6 +23,30 @@ _pko_chart = (
     + "/"
     + _chart_deps["pulumi-kubernetes-operator"]["name"]
 )
+
+# PKO CRDs
+PKO_CRDS_VERSION = "v" + _chart_deps["pulumi-kubernetes-operator"]["version"]
+
+_PKO_CRD_FILES = [
+    "pulumi.com_stacks.yaml",  # Stack CRs: infra-bootstrap / infra-apps / my-apps
+    "pulumi.com_programs.yaml",
+    "auto.pulumi.com_updates.yaml",
+    "auto.pulumi.com_workspaces.yaml",
+]
+
+
+def _load_pko_crds() -> list:
+    """Fetch the PKO CRD manifests pinned to PKO_CRDS_VERSION from the operator repo."""
+    base = (
+        "https://raw.githubusercontent.com/pulumi/pulumi-kubernetes-operator/"
+        f"{PKO_CRDS_VERSION}/deploy/crds/"
+    )
+    docs = []
+    for f in _PKO_CRD_FILES:
+        url = base + f
+        with urllib.request.urlopen(url, timeout=60) as r:
+            docs.append(yaml.safe_load(r))
+    return docs
 
 # Create new Kubernetes Namespaces
 namespace = Namespace(
@@ -117,6 +143,21 @@ pko = Release(
         atomic=True,  # Rollback on failure
     ),
 )
+
+# PKO CRDs as durable Pulumi-managed resources
+pko_crds = [
+    CustomResourceDefinition(
+        # Stable logical name -> stable URN for `pulumi import`.
+        crd["metadata"]["name"].replace(".", "-") + "-crd",
+        metadata=crd.get("metadata"),
+        spec=crd["spec"],
+        opts=ResourceOptions(
+            protect=True,
+            depends_on=[pko],
+        ),
+    )
+    for crd in _load_pko_crds()
+]
 
 infra_apps = CustomResource(
     "infra-apps",
