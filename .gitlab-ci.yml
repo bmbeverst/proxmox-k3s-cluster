@@ -8,6 +8,7 @@
 stages:
   - test # template security scans (semgrep-sast, secret_detection) default here
   - build # build + push our custom container images
+  - scan # container scanning of the images we just built
   - maintenance
 
 # Only include the security scan templates in non-scheduled pipelines. This is
@@ -23,6 +24,7 @@ include:
   - template: Security/Secret-Detection.gitlab-ci.yml
     rules:
       - if: $CI_PIPELINE_SOURCE != "schedule"
+  - template: Security/Container-Scanning.gitlab-ci.yml
 
 variables:
   SECRET_DETECTION_ENABLED: "true"
@@ -52,7 +54,7 @@ renovate:
 #   that lives in the my-apps Pulumi stack).
 .buildah: &buildah
   stage: build
-  image: quay.io/containers/buildah:stable
+  image: quay.io/containers/buildah:latest
 
 build:vints-server:
   <<: *buildah
@@ -91,3 +93,23 @@ build:vints-backup:
       changes:
         - pulumi/my-apps/containers/backup/**
     - when: manual
+
+# Scan both images we just built. Runs in its own stage AFTER build (stage
+# ordering guarantees the images exist). The analyzer pulls them from the
+# GitLab registry using the auto-injected CI_REGISTRY_USER/_PASSWORD.
+# NOTE: the Container-Scanning template spins up a Docker-in-Docker service,
+# which needs the runner to run in privileged mode. If this fails on a shared
+# runner, we'll drop it or switch to a Trivy-only job.
+container_scanning:
+  stage: scan
+  variables:
+    CS_IMAGE: "$CI_REGISTRY_IMAGE/vints-server:latest,$CI_REGISTRY_IMAGE/vints-backup:latest"
+    CS_DOCKERFILE_PATH: "pulumi/my-apps/containers/server/Dockerfile"
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "push"
+      changes:
+        - pulumi/my-apps/containers/server/**
+        - pulumi/my-apps/containers/backup/**
+        - pulumi/versions.yaml
+    - when: manual
+
