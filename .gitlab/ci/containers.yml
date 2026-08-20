@@ -1,0 +1,87 @@
+# Container build + scan jobs for the custom container images.
+# Included from the root .gitlab-ci.yml (`- local: .gitlab/ci/containers.yml`).
+#
+# The root pipeline only carries SAST / secret-detection / renovate and the single
+# odd-one-out DOTNET_TAG var; everything image-related lives here. The `build` and
+# `scan` stages and the Security/Container-Scanning template are defined in the
+# root file; this file just provides the jobs.
+
+# Build + push vints-server from the pinned build-time DOTNET_TAG.
+build:vints:
+  stage: build
+  image: quay.io/containers/buildah:latest
+  script:
+    - >
+      buildah build --storage-driver=vfs --isolation=chroot
+      --build-arg DOTNET_TAG="$DOTNET_TAG"
+      --tag "$CI_REGISTRY_IMAGE/vints-server:latest" pulumi/my-apps/containers/server
+    - >
+      buildah push --storage-driver=vfs
+      --creds "$CI_REGISTRY_USER:$CI_REGISTRY_PASSWORD"
+      "$CI_REGISTRY_IMAGE/vints-server:latest"
+      "docker://$CI_REGISTRY_IMAGE/vints-server:latest"
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "push"
+      changes:
+        - pulumi/my-apps/containers/server/**
+        - .gitlab/ci/containers.yml
+        # Rebuild when the build-time .NET tag changes (renovate edits .gitlab-ci.yml).
+        - .gitlab-ci.yml
+    - when: manual
+
+# vints-backup is fully independent: no build-time version inputs, so it is built
+# only when its own sources change (never on version / .NET bump).
+build:vints-backup:
+  stage: build
+  image: quay.io/containers/buildah:latest
+  script:
+    - >
+      buildah build --storage-driver=vfs --isolation=chroot
+      --tag "$CI_REGISTRY_IMAGE/vints-backup:latest" pulumi/my-apps/containers/backup
+    - >
+      buildah push --storage-driver=vfs
+      --creds "$CI_REGISTRY_USER:$CI_REGISTRY_PASSWORD"
+      "$CI_REGISTRY_IMAGE/vints-backup:latest"
+      "docker://$CI_REGISTRY_IMAGE/vints-backup:latest"
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "push"
+      changes:
+        - pulumi/my-apps/containers/backup/**
+        - .gitlab/ci/containers.yml
+    - when: manual
+
+# Container scanning: one separate (non-matrix) scan job per image (each extends the
+# Security/Container-Scanning template job). Disable the template's default job, then
+# add one scan per image so the server rescans on a .NET bump while the backup scans
+# only when its own sources change.
+container_scanning:
+  rules:
+    - when: never
+
+container_scanning:vints:
+  extends: container_scanning
+  stage: scan
+  variables:
+    CS_IMAGE: "$CI_REGISTRY_IMAGE/vints-server:latest"
+    CS_DOCKERFILE_PATH: "pulumi/my-apps/containers/server/Dockerfile"
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "push"
+      changes:
+        - pulumi/my-apps/containers/server/**
+        - .gitlab/ci/containers.yml
+        # Rescan when the build-time .NET tag bumps (renovate edits .gitlab-ci.yml).
+        - .gitlab-ci.yml
+    - when: manual
+
+container_scanning:vints-backup:
+  extends: container_scanning
+  stage: scan
+  variables:
+    CS_IMAGE: "$CI_REGISTRY_IMAGE/vints-backup:latest"
+    CS_DOCKERFILE_PATH: "pulumi/my-apps/containers/backup/Dockerfile"
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "push"
+      changes:
+        - pulumi/my-apps/containers/backup/**
+        - .gitlab/ci/containers.yml
+    - when: manual
