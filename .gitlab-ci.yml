@@ -7,6 +7,7 @@
 # See https://docs.gitlab.com/ee/ci/variables/#cicd-variable-precedence
 stages:
   - test # template security scans (semgrep-sast, secret_detection) default here
+  - build # build + push our custom container images
   - maintenance
 
 # Only include the security scan templates in non-scheduled pipelines. This is
@@ -25,6 +26,9 @@ include:
 
 variables:
   SECRET_DETECTION_ENABLED: "true"
+  # Must match dotnet_runtime_tag in pulumi/versions.yaml (the .NET 10 runtime is
+  # a documented Vintage Story server dependency). Passed to the server Dockerfile ARG.
+  DOTNET_TAG: "10.0"
 
 # Automatically update dependencies via Renovate
 renovate:
@@ -40,3 +44,48 @@ renovate:
     - renovate
   only:
     - schedules
+# Build + push our custom images to GitLab Container Registry.
+# - Kaniko: builds without a privileged Docker daemon (works on non-privileged
+#   shared runners). Push auth is automatic via GitLab's CI_REGISTRY_* vars.
+# - Only images are built here; the cluster pulls them (via an imagePullSecret
+#   that lives in the my-apps Pulumi stack).
+.build-kaniko: &build-kaniko
+  stage: build
+  image:
+    name: gcr.io/kaniko-project/executor:latest
+    entrypoint: [""]
+  before_script:
+    - mkdir -p /kaniko/.docker
+    # Kaniko (go-containerregistry) reads username/password directly from
+    # /kaniko/.docker/config.json; no base64 auth needed.
+    - 'printf "{\"auths\":{\"%s\":{\"username\":\"%s\",\"password\":\"%s\"}}}\n" "$CI_REGISTRY" "$CI_REGISTRY_USER" "$CI_REGISTRY_PASSWORD" > /kaniko/.docker/config.json'
+
+build:vints-server:
+  <<: *build-kaniko
+  script:
+    - >
+      /kaniko/executor
+      --context "$CI_PROJECT_DIR/pulumi/my-apps/containers/server"
+      --dockerfile Dockerfile
+      --destination "$CI_REGISTRY_IMAGE/vints-server:latest"
+      --build-arg DOTNET_TAG="$DOTNET_TAG"
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "push"
+      changes:
+        - pulumi/my-apps/containers/server/**
+        - pulumi/versions.yaml
+    - when: manual
+
+build:vints-backup:
+  <<: *build-kaniko
+  script:
+    - >
+      /kaniko/executor
+      --context "$CI_PROJECT_DIR/pulumi/my-apps/containers/backup"
+      --dockerfile Dockerfile
+      --destination "$CI_REGISTRY_IMAGE/vints-backup:latest"
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "push"
+      changes:
+        - pulumi/my-apps/containers/backup/**
+    - when: manual

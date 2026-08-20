@@ -1,0 +1,23 @@
+# Vintage Story server runtime image — slim by design.
+# Carries ONLY the .NET 10 runtime + download/extract tooling.
+ARG DOTNET_TAG=10.0
+FROM mcr.microsoft.com/dotnet/runtime:${DOTNET_TAG}
+
+# .NET 10 runtime is the documented system dependency (dotnet-runtime-10.0).
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends curl ca-certificates tar jq \
+ && rm -rf /var/lib/apt/lists/*
+
+# Non-root runtime identity (LINSTOR PVCs are mounted with fsGroup 1001, see __main__.py).
+RUN useradd --system --uid 1001 --home-dir /serverfiles --shell /bin/bash vints \
+ && mkdir -p /serverfiles /entrypoints \
+ && chown -R vints:vints /serverfiles
+COPY entrypoints/ /entrypoints/
+RUN chmod +x /entrypoints/*.sh
+
+USER 1001
+WORKDIR /serverfiles
+ENV PORT=42420 DATA_PATH=/data
+# No ENTRYPOINT on purpose: Kubernetes `command` per container (see __main__.py)
+# selects install-vints.sh (init) vs start-vints.sh (main). An image
+# ENTRYPOINT cannot be removed by K8s and would break the init container.
