@@ -281,6 +281,11 @@ my_apps = CustomResource(
             },
         },
         "stack": "bmbeverst/my-apps/dev",
+        # my-apps requires the infra stacks to run first.
+        "prerequisites": [
+            {"name": "infra-bootstrap"},
+            {"name": "infra-apps"},
+        ],
         "projectRepo": "https://gitlab.com/proxmox-k3s/proxmox-k3s-cluster.git",
         "repoDir": "pulumi/my-apps/",
         "branch": "main",

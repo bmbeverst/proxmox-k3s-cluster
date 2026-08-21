@@ -1,15 +1,6 @@
 """Ghost blog deployed on the k3s cluster (its own `ghost` namespace).
 
 - SQLite-backed (no DB service; follows the locked-in decision).
-- Official Ghost image, alpine tag pinned.
-- Content persisted on the replicated `linstor-r2` StorageClass so a pod
-  reschedules cleanly when a node dies.
-- Local + insecure access only (ClusterIP + NodePort, no ingress/TLS yet).
-
-Split out of the original monolithic `__main__.py` so each app lives in its own
-module. `__main__.py` stays a thin orchestrator: it creates each app's own
-Namespace (see `NAMESPACE`), holds the cross-stack dependencies on the infra
-stacks, and calls `register()` here and in `vintagestory.py`.
 """
 
 import os
@@ -20,8 +11,6 @@ import pulumi
 import pulumi_kubernetes as k8s
 from pulumi_kubernetes.meta.v1 import ObjectMetaArgs
 
-# Ghost image tag lives in ../versions.yaml, bumped by the single regex
-# customManager (docker datasource) in renovate.json — see that file.
 with open(os.path.join(os.path.dirname(__file__), "..", "versions.yaml")) as f:
     _versions = yaml.safe_load(f)
 
@@ -29,30 +18,19 @@ GHOST_IMAGE = f"ghost:{_versions['ghost_image_tag']}"
 
 NAMESPACE = "ghost"
 
-# One canonical URL for Ghost (redirects/admin/canonical links need a single
-# value) that must be reachable from INSIDE the pod too: Ghost's homepage
-# probes assets at its own canonical `url` (image-size checks). A NodePort on a
-# NODE IP is reachable from both the browser and from pods (kube-proxy), whereas
-# the kube-vip control-plane VIP (10.10.1.99) was NOT reachable from pods and
-# made the homepage hang (crash loop). Node IP is a single-node weak point for
-# browser access — accepted for this no-ingress local pass; the durable fix is
-# the deferred Traefik/Cloudflare ingress. Any of the 3 nodes serves NodePort.
-# Ghost is pinned to node3 (10.10.1.113) — where it currently runs — and served on
-# NodePort 31681. Port 31680 is still held by the legacy pre-migration my-apps/ghost
-# Service, so we renumber to a free port rather than collide with it.
+# One canonical URL for Ghost
 GHOST_NODE = "node3"
 GHOST_NODE_IP = "10.10.1.113"
 GHOST_NODE_PORT = "31681"
 GHOST_URL = f"http://{GHOST_NODE_IP}:{GHOST_NODE_PORT}"
 
 
-def register(namespace, infra_deps):
+def register(namespace):
     """Create the Ghost workload, its content PVC and the NodePort Service.
 
     `namespace` is the `ghost` Namespace resource owned by __main__.py.
-    `infra_deps` is the list of inter-stack dependencies (StackReferences)
-    my-apps waits on, so nothing here is created until infra-bootstrap and
-    infra-apps have been up'd.
+    Ordering after the infra stacks is handled by PKO's Stack CR
+    `spec.prerequisites`, so workloads here only depend on `namespace`.
     """
 
     # Ghost content lives in /var/lib/ghost/content; SQLite DB at .../content/data/ghost.db.
@@ -67,7 +45,7 @@ def register(namespace, infra_deps):
                 requests={"storage": "2Gi"},
             ),
         ),
-        opts=pulumi.ResourceOptions(depends_on=[namespace, *infra_deps]),
+        opts=pulumi.ResourceOptions(depends_on=[namespace]),
     )
 
     ghost = k8s.apps.v1.Deployment(
@@ -91,7 +69,6 @@ def register(namespace, infra_deps):
                                     "name": "database__connection__filename",
                                     "value": "/var/lib/ghost/content/data/ghost.db",
                                 },
-                                # Bind 0.0.0.0 so the Service/NodePort can reach it.
                                 {"name": "server__host", "value": "0.0.0.0"},
                                 {"name": "server__port", "value": "2368"},
                             ],
@@ -145,7 +122,7 @@ def register(namespace, infra_deps):
                 ),
             ),
         ),
-        opts=pulumi.ResourceOptions(depends_on=[namespace, ghost_storage, *infra_deps]),
+        opts=pulumi.ResourceOptions(depends_on=[namespace, ghost_storage]),
     )
 
     # ClusterIP + NodePort for local, insecure access this pass.
@@ -164,5 +141,5 @@ def register(namespace, infra_deps):
                 ),
             ],
         ),
-        opts=pulumi.ResourceOptions(depends_on=[namespace, ghost, *infra_deps]),
+        opts=pulumi.ResourceOptions(depends_on=[namespace, ghost]),
     )
