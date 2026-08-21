@@ -6,12 +6,12 @@
   "minimumReleaseAge": "7 days",
   "automerge": true,
   "platformAutomerge": true,
+  "detectHostRulesFromEnv": true,
   "hostRules": [
     {
-      "description": "Authenticate to GitLab container registry for Renovate's docker datasource to list semver tags",
+      "description": "GitLab container registry: credentials provided via DOCKER_REGISTRY_GITLAB_COM_USERNAME / _PASSWORD env vars (detectHostRulesFromEnv)",
       "matchHost": "https://registry.gitlab.com",
-      "hostType": "docker",
-      "token": "{{ secrets.RENOVATE_TOKEN }}"
+      "hostType": "docker"
     }
   ],
   "packageRules": [
