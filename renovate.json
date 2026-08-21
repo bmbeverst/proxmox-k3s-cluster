@@ -114,7 +114,7 @@
       "format": "json",
       "defaultRegistryUrlTemplate": "http://api.vintagestory.at/stable-unstable.json",
       "transformTemplates": [
-        "{{#each keys}} {{this}}\n{{/each}}"
+        "{\"releases\": $map($keys($), function($v) {({\"version\": $v})})}"
       ]
     }
   }
