@@ -6,14 +6,6 @@
   "minimumReleaseAge": "7 days",
   "automerge": true,
   "platformAutomerge": true,
-  "detectHostRulesFromEnv": true,
-  "hostRules": [
-    {
-      "description": "GitLab container registry: credentials provided via DOCKER_REGISTRY_GITLAB_COM_USERNAME / _PASSWORD env vars (detectHostRulesFromEnv)",
-      "matchHost": "https://registry.gitlab.com",
-      "hostType": "docker"
-    }
-  ],
   "packageRules": [
     {
       "description": "Major bumps require manual review (never automerge); patch & minor automerge via the global automerge default",

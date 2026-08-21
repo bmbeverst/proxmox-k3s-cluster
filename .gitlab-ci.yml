@@ -43,6 +43,7 @@ renovate:
     RENOVATE_PLATFORM: "gitlab"
     RENOVATE_REPOSITORIES: $CI_PROJECT_PATH
     # Container registry auth for docker datasource (detectHostRulesFromEnv)
+    RENOVATE_DETECT_HOST_RULES_FROM_ENV: "true"
     DOCKER_REGISTRY_GITLAB_COM_USERNAME: "gitlab-ci-token"
     DOCKER_REGISTRY_GITLAB_COM_PASSWORD: $CI_JOB_TOKEN
   script:
