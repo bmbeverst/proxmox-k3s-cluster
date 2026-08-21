@@ -15,6 +15,17 @@
       "automerge": false
     },
     {
+      "description": "Ghost Docker image: stay on Alpine variants (versioningTemplate semver-coerced drops the -alpine suffix)",
+      "matchDatasources": [
+        "docker"
+      ],
+      "matchDepNames": [
+        "ghost"
+      ],
+      "versioning": "docker",
+      "allowedVersions": "/^\\d+\\.\\d+\\.\\d+-alpine$/"
+    },
+    {
       "description": "Piraeus operator chart (infra-apps): OCI registry exposes no release timestamp, so use GitHub releases to satisfy minimumReleaseAge/automerge",
       "matchManagers": [
         "helmv3"
