@@ -5,27 +5,36 @@ build:vints:
   stage: build
   image: quay.io/containers/buildah:v1.43.2-immutable
   script:
-    - >
-      buildah build --storage-driver=vfs --isolation=chroot
-      --tag "$CI_REGISTRY_IMAGE/vints-server:latest"
-      --tag "$CI_REGISTRY_IMAGE/vints-server:$CI_COMMIT_SHORT_SHA"
-      pulumi/my-apps/containers/server
-    - >
-      buildah push --storage-driver=vfs
-      --creds "$CI_REGISTRY_USER:$CI_REGISTRY_PASSWORD"
-      "$CI_REGISTRY_IMAGE/vints-server:latest"
-      "docker://$CI_REGISTRY_IMAGE/vints-server:latest"
     - |
-      if [ -n "$CI_COMMIT_SHORT_SHA" ]; then
-        buildah push --storage-driver=vfs \
-          --creds "$CI_REGISTRY_USER:$CI_REGISTRY_PASSWORD" \
-          "$CI_REGISTRY_IMAGE/vints-server:$CI_COMMIT_SHORT_SHA" \
-          "docker://$CI_REGISTRY_IMAGE/vints-server:$CI_COMMIT_SHORT_SHA"
-      fi
+      set -euo pipefail
+      # Read the deployed tag from versions.yaml; extract major.minor as the version track
+      TAG=$(grep '^vints_server_image_tag:' pulumi/versions.yaml | awk '{print $2}')
+      BASE="${TAG%.*}"
+      # Query the GitLab container registry (Docker Registry HTTP API v2) for existing tags
+      REGISTRY_TAGS=$(curl -s -u "$CI_REGISTRY_USER:$CI_REGISTRY_PASSWORD" \
+        "https://registry.gitlab.com/v2/proxmox-k3s/proxmox-k3s-cluster/vints-server/tags/list" \
+        2>/dev/null | grep -o '"tags":\[.*\]' | grep -o '"[^"]*"' | tr -d '"' \
+        | grep -E "^$BASE\." | sed 's/^.*\.//' | sort -n | tail -1 || true)
+      NEXT_PATCH=$(( ${REGISTRY_TAGS:-0} + 1 ))
+      FULL_TAG="$BASE.$NEXT_PATCH"
+      echo "Building $CI_REGISTRY_IMAGE/vints-server:$FULL_TAG (track $BASE, next patch $NEXT_PATCH)"
+      buildah build --storage-driver=vfs --isolation=chroot \
+        --tag "$CI_REGISTRY_IMAGE/vints-server:$FULL_TAG" \
+        --tag "$CI_REGISTRY_IMAGE/vints-server:latest" \
+        pulumi/my-apps/containers/server
+      buildah push --storage-driver=vfs \
+        --creds "$CI_REGISTRY_USER:$CI_REGISTRY_PASSWORD" \
+        "$CI_REGISTRY_IMAGE/vints-server:$FULL_TAG" \
+        "docker://$CI_REGISTRY_IMAGE/vints-server:$FULL_TAG"
+      buildah push --storage-driver=vfs \
+        --creds "$CI_REGISTRY_USER:$CI_REGISTRY_PASSWORD" \
+        "$CI_REGISTRY_IMAGE/vints-server:latest" \
+        "docker://$CI_REGISTRY_IMAGE/vints-server:latest"
   rules:
     - if: $CI_PIPELINE_SOURCE == "push"
       changes:
         - pulumi/my-apps/containers/server/**
+        - pulumi/versions.yaml
         - .gitlab/ci/containers.yml
     - when: never
 
@@ -33,27 +42,36 @@ build:vints-backup:
   stage: build
   image: quay.io/containers/buildah:v1.43.2-immutable
   script:
-    - >
-      buildah build --storage-driver=vfs --isolation=chroot
-      --tag "$CI_REGISTRY_IMAGE/vints-backup:latest"
-      --tag "$CI_REGISTRY_IMAGE/vints-backup:$CI_COMMIT_SHORT_SHA"
-      pulumi/my-apps/containers/backup
-    - >
-      buildah push --storage-driver=vfs
-      --creds "$CI_REGISTRY_USER:$CI_REGISTRY_PASSWORD"
-      "$CI_REGISTRY_IMAGE/vints-backup:latest"
-      "docker://$CI_REGISTRY_IMAGE/vints-backup:latest"
     - |
-      if [ -n "$CI_COMMIT_SHORT_SHA" ]; then
-        buildah push --storage-driver=vfs \
-          --creds "$CI_REGISTRY_USER:$CI_REGISTRY_PASSWORD" \
-          "$CI_REGISTRY_IMAGE/vints-backup:$CI_COMMIT_SHORT_SHA" \
-          "docker://$CI_REGISTRY_IMAGE/vints-backup:$CI_COMMIT_SHORT_SHA"
-      fi
+      set -euo pipefail
+      # Read the deployed tag from versions.yaml; extract major.minor as the version track
+      TAG=$(grep '^vints_backup_image_tag:' pulumi/versions.yaml | awk '{print $2}')
+      BASE="${TAG%.*}"
+      # Query the GitLab container registry (Docker Registry HTTP API v2) for existing tags
+      REGISTRY_TAGS=$(curl -s -u "$CI_REGISTRY_USER:$CI_REGISTRY_PASSWORD" \
+        "https://registry.gitlab.com/v2/proxmox-k3s/proxmox-k3s-cluster/vints-backup/tags/list" \
+        2>/dev/null | grep -o '"tags":\[.*\]' | grep -o '"[^"]*"' | tr -d '"' \
+        | grep -E "^$BASE\." | sed 's/^.*\.//' | sort -n | tail -1 || true)
+      NEXT_PATCH=$(( ${REGISTRY_TAGS:-0} + 1 ))
+      FULL_TAG="$BASE.$NEXT_PATCH"
+      echo "Building $CI_REGISTRY_IMAGE/vints-backup:$FULL_TAG (track $BASE, next patch $NEXT_PATCH)"
+      buildah build --storage-driver=vfs --isolation=chroot \
+        --tag "$CI_REGISTRY_IMAGE/vints-backup:$FULL_TAG" \
+        --tag "$CI_REGISTRY_IMAGE/vints-backup:latest" \
+        pulumi/my-apps/containers/backup
+      buildah push --storage-driver=vfs \
+        --creds "$CI_REGISTRY_USER:$CI_REGISTRY_PASSWORD" \
+        "$CI_REGISTRY_IMAGE/vints-backup:$FULL_TAG" \
+        "docker://$CI_REGISTRY_IMAGE/vints-backup:$FULL_TAG"
+      buildah push --storage-driver=vfs \
+        --creds "$CI_REGISTRY_USER:$CI_REGISTRY_PASSWORD" \
+        "$CI_REGISTRY_IMAGE/vints-backup:latest" \
+        "docker://$CI_REGISTRY_IMAGE/vints-backup:latest"
   rules:
     - if: $CI_PIPELINE_SOURCE == "push"
       changes:
         - pulumi/my-apps/containers/backup/**
+        - pulumi/versions.yaml
         - .gitlab/ci/containers.yml
     - when: never
 
@@ -105,7 +123,7 @@ smoke:vints:
     - |
       set -e
       die() { echo "smoke FAILED: $1"; podman logs smoke-vints 2>/dev/null || true; podman rm -f smoke-vints >/dev/null 2>&1 || true; exit 1; }
-      TAG=latest; [ -n "$CI_COMMIT_SHORT_SHA" ] && TAG="$CI_COMMIT_SHORT_SHA"
+       TAG="latest"
       # The image intentionally does NOT bake the server in; the init container runs
       # install-vints.sh to download it. Replicate that. Needs egress to
       # api/cdn.vintagestory.at from the runner.
@@ -161,9 +179,8 @@ smoke:vints-backup:
   script:
     - podman login -u "$CI_REGISTRY_USER" -p "$CI_REGISTRY_PASSWORD" "$CI_REGISTRY"
     - |
+      TAG="latest"
       set -e
-      TAG=latest
-      [ -n "$CI_COMMIT_SHORT_SHA" ] && TAG="$CI_COMMIT_SHORT_SHA"
       D=$(mktemp -d)
       mkdir -p "$D/data/Saves" "$D/dest" "$D/tmp"
       printf 'world' > "$D/data/Saves/seed.vcdbs"

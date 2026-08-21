@@ -1,17 +1,11 @@
-"""Vintage Story dedicated server deployed on the k3s cluster (its own
-`vintagestory` namespace).
+"""Vintage Story dedicated server deployed on the k3s cluster
 
 - Self-built slim server image (`.NET 10` runtime + the install/update scripts);
   the binary + mods are installed/updated by an init container every pod start.
-- World/config/mods persisted on the replicated `linstor-r2` StorageClass.
-- Pinned to `node1` (deliberate single-node weak point, like Ghost).
+- World/config/mods persisted on the StorageClass
 - Backup = a CronJob that hard-link snapshots `Saves/`, tars it and writes it to
   an NFS share outside the cluster.
 
-Split out of the original monolithic `__main__.py` so each app lives in its own
-module. `__main__.py` stays a thin orchestrator: it creates each app's own
-Namespace (see `NAMESPACE`), holds the cross-stack dependencies on the infra
-stacks, and calls `register()` here and in `ghost.py`.
 """
 
 import base64
@@ -30,13 +24,11 @@ with open(os.path.join(os.path.dirname(__file__), "..", "versions.yaml")) as f:
 
 NAMESPACE = "vintagestory"
 
-# Images are built + pushed to the project GitLab registry by CI. The cluster pulls
-# them using a docker-registry Secret created from the stack's read-only deploy token
-# (my-apps:vintsRegistryReadUser / _Token in Pulumi.dev.yaml).
+# Images are built + pushed to the project GitLab registry by CI.
 VINTS_REGISTRY = "registry.gitlab.com"
 VINTS_REGISTRY_IMAGE_ROOT = f"{VINTS_REGISTRY}/proxmox-k3s/proxmox-k3s-cluster"
-VINTS_IMAGE = f"{VINTS_REGISTRY_IMAGE_ROOT}/vints-server:latest"
-VINTS_BACKUP_IMAGE = f"{VINTS_REGISTRY_IMAGE_ROOT}/vints-backup:latest"
+VINTS_IMAGE = f"{VINTS_REGISTRY_IMAGE_ROOT}/vints-server:{_versions['vints_server_image_tag']}"
+VINTS_BACKUP_IMAGE = f"{VINTS_REGISTRY_IMAGE_ROOT}/vints-backup:{_versions['vints_backup_image_tag']}"
 
 _vints_cfg = pulumi.Config("my-apps")
 _vints_registry_user = _vints_cfg.require_secret("vintsRegistryReadUser")
@@ -58,11 +50,11 @@ def _vints_dockerconfigjson(user, token):
 _vints_dockerconfig = pulumi.Output.all(_vints_registry_user, _vints_registry_token).apply(
     lambda ut: _vints_dockerconfigjson(ut[0], ut[1]))
 
-VS_VERSION = _versions["vintagestory_version"]  # from ../versions.yaml
-VINTS_NODE = "node2"       # least-loaded node at deploy time (live usage: node2 54% vs node1 73% / node3 77%); PVC + backup NFS work from any node
-VINTS_PORT = 42420         # Vintage Story game port (TCP + UDP)
-VINTS_NODE_PORT = 30420    # NodePort for LAN clients (inside default 30000-32767 range)
-VINTS_NFS_SERVER = "10.10.1.101"  # PVE host serving the backup export
+VS_VERSION = _versions["vintagestory_version"]
+VINTS_NODE = "node2"       # temp setting for testing
+VINTS_PORT = 42420
+VINTS_NODE_PORT = 30420
+VINTS_NFS_SERVER = "10.10.1.101"  # host serving the backup export
 VINTS_NFS_PATH = "/pvebackup"     # export; writable by uid 1001
 
 # ConfigMap: pinned version env + the mods list (direct .zip URLs, one per line;
@@ -86,21 +78,16 @@ def _vints_env():
     ]
 
 
-def register(namespace, infra_deps):
+def register(namespace):
     """Create the Vintage Story Secret/ConfigMap/PVC, its Deployment + Service,
-    and the backup CronJob.
-
-    `namespace` is the `vintagestory` Namespace resource owned by __main__.py.
-    `infra_deps` is the list of inter-stack dependencies (StackReferences)
-    my-apps waits on, so nothing here is created until infra-bootstrap and
-    infra-apps have been up'd.
+    and the backup CronJob
     """
     vints_regcred = k8s.core.v1.Secret(
         "vints-regcred",
         metadata=ObjectMetaArgs(name="vints-regcred", namespace=NAMESPACE),
         type="kubernetes.io/dockerconfigjson",
         string_data={".dockerconfigjson": _vints_dockerconfig},
-        opts=pulumi.ResourceOptions(depends_on=[namespace, *infra_deps]),
+        opts=pulumi.ResourceOptions(depends_on=[namespace]),
     )
 
     vints_config = k8s.core.v1.ConfigMap(
@@ -111,11 +98,10 @@ def register(namespace, infra_deps):
             "PORT": str(VINTS_PORT),
             "mods.txt": _vints_mods,
         },
-        opts=pulumi.ResourceOptions(depends_on=[namespace, *infra_deps]),
+        opts=pulumi.ResourceOptions(depends_on=[namespace]),
     )
 
     # World/data lives on the replicated StorageClass so it survives a node death.
-    # Includes config (serverconfig.json), Saves/, Mods/, Logs/.
     vints_data = k8s.core.v1.PersistentVolumeClaim(
         "vints-data",
         metadata=ObjectMetaArgs(name="vints-data", namespace=NAMESPACE),
@@ -126,13 +112,11 @@ def register(namespace, infra_deps):
                 requests={"storage": "16Gi"},
             ),
         ),
-        opts=pulumi.ResourceOptions(depends_on=[namespace, *infra_deps]),
+        opts=pulumi.ResourceOptions(depends_on=[namespace]),
     )
 
-    # Job/identity: the init container installs + updates server files (emptyDir
-    # /serverfiles) and mods (/data/Mods) every pod start; the main container then
-    # runs the server as PID 1. No image ENTRYPOINT — each container selects its
-    # script via `command`.
+    # the init container installs + updates server and mods every pod start
+    # the main container then runs the server as PID 1.
     vints = k8s.apps.v1.Deployment(
         "vints",
         metadata=ObjectMetaArgs(name="vints", namespace=NAMESPACE),
@@ -142,11 +126,8 @@ def register(namespace, infra_deps):
             template=k8s.core.v1.PodTemplateSpecArgs(
                 metadata=ObjectMetaArgs(labels={"app": "vints"}),
                 spec=k8s.core.v1.PodSpecArgs(
-                    # Pin to one node: predictable real-RAM headroom AND lets the
-                    # backup CronJob (same node) mount the RWO world PVC concurrently.
                     node_selector={"kubernetes.io/hostname": VINTS_NODE},
-                    # Large so the world save completes cleanly on shutdown/upgrade.
-                    termination_grace_period_seconds=600,
+                    termination_grace_period_seconds=30,
                     security_context=k8s.core.v1.PodSecurityContextArgs(
                         run_as_user=1001,
                         run_as_non_root=True,
@@ -159,6 +140,7 @@ def register(namespace, infra_deps):
                         k8s.core.v1.ContainerArgs(
                             name="vints-installer",
                             image=VINTS_IMAGE,
+                            image_pull_policy="Always",
                             command=["/entrypoints/install-vints.sh"],
                             env=_vints_env(),
                             security_context=k8s.core.v1.SecurityContextArgs(
@@ -175,7 +157,6 @@ def register(namespace, infra_deps):
                                     name="vints-data", mount_path="/data"),
                                 k8s.core.v1.VolumeMountArgs(
                                     name="vints-config", mount_path="/config"),
-                                # Downloads/solves to /tmp, not the read-only root fs.
                                 k8s.core.v1.VolumeMountArgs(
                                     name="tmp", mount_path="/tmp"),
                             ],
@@ -185,11 +166,10 @@ def register(namespace, infra_deps):
                         k8s.core.v1.ContainerArgs(
                             name="vints",
                             image=VINTS_IMAGE,
+                            image_pull_policy="Always",
                             command=["/entrypoints/start-vints.sh"],
                             env=_vints_env(),
-                            # Expose the server console via stdin/tty so that
-                            # `kubectl attach -it deploy/vints -c vints` reaches
-                            # the running server's interactive console.
+                            # `kubectl attach -it deploy/vints -c vints` server's interactive console.
                             stdin=True,
                             tty=True,
                             security_context=k8s.core.v1.SecurityContextArgs(
@@ -197,9 +177,6 @@ def register(namespace, infra_deps):
                                 allow_privilege_escalation=False,
                                 capabilities=k8s.core.v1.CapabilitiesArgs(
                                     drop=["ALL"]),
-                                # read_only_root_filesystem intentionally NOT set: the
-                                # server may lazily write to its cwd (/serverfiles).
-                                # Enable it only once writes are confined to mounts.
                             ),
                             ports=[
                                 k8s.core.v1.ContainerPortArgs(
@@ -213,11 +190,6 @@ def register(namespace, infra_deps):
                                 requests={"cpu": "1000m", "memory": "2Gi"},
                                 limits={"cpu": "2000m", "memory": "3Gi"},
                             ),
-                            # tcpSocket probes reflect "is the server actually listening".
-                            # (A check like test -d /data/Saves would stay green forever
-                            # once the world exists, even on a crash-loop.) NOTE: if VS
-                            # turns out to be UDP-only on this port, drop these and use a
-                            # process/log probe instead.
                             readiness_probe=k8s.core.v1.ProbeArgs(
                                 tcp_socket=k8s.core.v1.TCPSocketActionArgs(
                                     port=VINTS_PORT),
@@ -263,7 +235,7 @@ def register(namespace, infra_deps):
                 ),
             ),
         ),
-        opts=pulumi.ResourceOptions(depends_on=[namespace, vints_regcred, vints_data, vints_config, *infra_deps]),
+        opts=pulumi.ResourceOptions(depends_on=[namespace, vints_regcred, vints_data, vints_config]),
     )
 
     # NodePort so LAN clients can join. TCP+UDP on the game port, both mapped to
@@ -283,7 +255,7 @@ def register(namespace, infra_deps):
                     protocol="UDP", node_port=VINTS_NODE_PORT),
             ],
         ),
-        opts=pulumi.ResourceOptions(depends_on=[namespace, vints, *infra_deps]),
+        opts=pulumi.ResourceOptions(depends_on=[namespace, vints]),
     )
 
     # Backup: a CronJob that snapshots + tars the world and writes it to an NFS share
@@ -314,6 +286,7 @@ def register(namespace, infra_deps):
                                 k8s.core.v1.ContainerArgs(
                                     name="vints-backup",
                                     image=VINTS_BACKUP_IMAGE,
+                                    image_pull_policy="Always",
                                     env=[
                                         {"name": "DATA_PATH", "value": "/data"},
                                         {"name": "BACKUP_DEST", "value": "/backups"},
@@ -362,5 +335,5 @@ def register(namespace, infra_deps):
                 ),
             ),
         ),
-        opts=pulumi.ResourceOptions(depends_on=[namespace, *infra_deps]),
+        opts=pulumi.ResourceOptions(depends_on=[namespace]),
     )

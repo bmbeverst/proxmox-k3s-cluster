@@ -6,6 +6,14 @@
   "minimumReleaseAge": "7 days",
   "automerge": true,
   "platformAutomerge": true,
+  "hostRules": [
+    {
+      "description": "Authenticate to GitLab container registry for Renovate's docker datasource to list semver tags",
+      "matchHost": "https://registry.gitlab.com",
+      "hostType": "docker",
+      "token": "{{ secrets.RENOVATE_TOKEN }}"
+    }
+  ],
   "packageRules": [
     {
       "description": "Major bumps require manual review (never automerge); patch & minor automerge via the global automerge default",
@@ -51,6 +59,21 @@
       "overridePackageName": "piraeusdatastore/helm-charts",
       "extractVersion": "^linstor-cluster-(?<version>\\d+\\.\\d+\\.\\d+)$",
       "versioning": "helm"
+    },
+    {
+      "description": "Vints Docker images from private GitLab registry: no minimumReleaseAge (tag age = creation time), only numeric semver tags",
+      "matchDatasources": [
+        "docker"
+      ],
+      "matchDepNames": [
+        "proxmox-k3s/proxmox-k3s-cluster/vints-server",
+        "proxmox-k3s/proxmox-k3s-cluster/vints-backup"
+      ],
+      "matchFileNames": [
+        "pulumi/versions.yaml"
+      ],
+      "minimumReleaseAge": null,
+      "allowedVersions": "/^\\d+\\.\\d+\\.\\d+$/"
     },
     {
       "description": "Pulumi Kubernetes operator chart (infra-bootstrap): use timestamped GitHub chart releases for Pulumi Operator",
