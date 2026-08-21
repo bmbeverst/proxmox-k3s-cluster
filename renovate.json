@@ -105,19 +105,17 @@
         "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)\\r?\\n\\s*[A-Za-z0-9_]+:\\s*[\"']?(?<currentValue>[^\\s\"']+)[\"']?"
       ],
       "datasourceTemplate": "{{{datasource}}}",
-      "depNameTemplate": "{{{depName}}}"
+      "depNameTemplate": "{{{depName}}}",
+      "versioningTemplate": "semver-coerced"
     }
   ],
   "customDatasources": {
     "custom-vintagestory": {
       "format": "json",
-      "registryUrlTemplates": [
-        "http://api.vintagestory.at/stable-unstable.json"
-      ],
+      "defaultRegistryUrlTemplate": "http://api.vintagestory.at/stable-unstable.json",
       "transformTemplates": [
         "{{#each keys}} {{this}}\n{{/each}}"
-      ],
-      "versioning": "semver-coerced"
+      ]
     }
   }
 }
