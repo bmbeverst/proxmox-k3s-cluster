@@ -12,9 +12,9 @@ ghost_image_tag: 6.57.1-alpine
 vintagestory_version: 1.22.7
 
 # --- vints-server ---
-# renovate: datasource=docker depName=registry.gitlab.com/proxmox-k3s/proxmox-k3s-cluster/vints-server versioning=semver
+# renovate: datasource=docker depName=registry.gitlab.com/proxmox-k3s/proxmox-k3s-cluster/vints-server
 vints_server_image_tag: 1.0.0
 
 # --- vints-backup ---
-# renovate: datasource=docker depName=registry.gitlab.com/proxmox-k3s/proxmox-k3s-cluster/vints-backup versioning=semver
+# renovate: datasource=docker depName=registry.gitlab.com/proxmox-k3s/proxmox-k3s-cluster/vints-backup
 vints_backup_image_tag: 1.0.1
