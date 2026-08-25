@@ -13,7 +13,7 @@ vintagestory_version: 1.22.7
 
 # --- vints-server ---
 # renovate: datasource=docker depName=registry.gitlab.com/proxmox-k3s/proxmox-k3s-cluster/vints-server
-vints_server_image_tag: 1.0.0
+vints_server_image_tag: 1.0.1
 
 # --- vints-backup ---
 # renovate: datasource=docker depName=registry.gitlab.com/proxmox-k3s/proxmox-k3s-cluster/vints-backup
