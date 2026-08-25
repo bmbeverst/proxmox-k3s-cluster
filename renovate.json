@@ -69,8 +69,8 @@
         "docker"
       ],
       "matchDepNames": [
-        "proxmox-k3s/proxmox-k3s-cluster/vints-server",
-        "proxmox-k3s/proxmox-k3s-cluster/vints-backup"
+        "registry.gitlab.com/proxmox-k3s/proxmox-k3s-cluster/vints-server",
+        "registry.gitlab.com/proxmox-k3s/proxmox-k3s-cluster/vints-backup"
       ],
       "matchFileNames": [
         "pulumi/versions.yaml"
