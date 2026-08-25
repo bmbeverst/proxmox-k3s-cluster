@@ -105,7 +105,7 @@
         "/pulumi/versions\\.yaml$/"
       ],
       "matchStrings": [
-        "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)\\r?\\n\\s*[A-Za-z0-9_]+:\\s*[\"']?(?<currentValue>[^\\s\"']+)[\"']?"
+        "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+).*\\r?\\n\\s*[A-Za-z0-9_]+:\\s*[\"']?(?<currentValue>[^\\s\"']+)[\"']?"
       ],
       "datasourceTemplate": "{{{datasource}}}",
       "depNameTemplate": "{{{depName}}}",
