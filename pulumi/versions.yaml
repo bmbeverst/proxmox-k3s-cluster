@@ -17,4 +17,4 @@ vints_server_image_tag: 1.0.0
 
 # --- vints-backup ---
 # renovate: datasource=docker depName=registry.gitlab.com/proxmox-k3s/proxmox-k3s-cluster/vints-backup versioning=semver
-vints_backup_image_tag: 1.0.0
+vints_backup_image_tag: 1.0.1
