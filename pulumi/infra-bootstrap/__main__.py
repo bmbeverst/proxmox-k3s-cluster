@@ -193,6 +193,7 @@ infra_apps = CustomResource(
                 },
             },
         },
+        "workspaceReclaimPolicy": "Delete",
         "destroyOnFinalize": True,
         "refresh": True,
         "workspaceTemplate": {
@@ -243,6 +244,7 @@ infra_bootstrap = CustomResource(
                 },
             },
         },
+        "workspaceReclaimPolicy": "Delete",
         "destroyOnFinalize": True,
         "refresh": True,
         "workspaceTemplate": {
@@ -298,6 +300,7 @@ my_apps = CustomResource(
                 },
             },
         },
+        "workspaceReclaimPolicy": "Delete",
         "destroyOnFinalize": True,
         "refresh": True,
         "workspaceTemplate": {
