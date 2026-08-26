@@ -448,7 +448,9 @@ vmsingle = k8s.helm.v3.Release(
                 },
             },
         },
-        timeout=300,
+        # 600s: linstor-r2 uses WaitForFirstConsumer — PVC binding adds latency
+        # before the StatefulSet pod becomes Ready.
+        timeout=600,
     ),
 )
 # kube-state-metrics — workload ownership/status metrics KRR needs
@@ -470,6 +472,6 @@ kube_state_metrics = k8s.helm.v3.Release(
                 "limits": {"cpu": "50m", "memory": "128Mi"},
             },
         },
-        timeout=300,
+        timeout=600,
     ),
 )
