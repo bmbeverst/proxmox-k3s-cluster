@@ -384,7 +384,7 @@ vmsingle = k8s.helm.v3.Release(
                                             "|container_memory_working_set_bytes"
                                         ),
                                     },
-                                    # Drop cgroup-aggregate series ("POD") and no container labels both double-count real containers.
+                                    # "POD" and empty container labels both double-count real containers
                                     {
                                         "source_labels": ["container"],
                                         "action": "drop",
