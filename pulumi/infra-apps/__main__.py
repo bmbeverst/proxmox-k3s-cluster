@@ -339,8 +339,8 @@ vmsingle = k8s.helm.v3.Release(
     k8s.helm.v3.ReleaseArgs(
         chart="victoria-metrics-single",
         version=_chart_deps["victoria-metrics-single"]["version"],
-        namespace="infra-apps",
-        create_namespace=False,  # created by infra-bootstrap
+        namespace="monitoring",
+        create_namespace=True,
         repository_opts=k8s.helm.v3.RepositoryOptsArgs(
             repo=_chart_deps["victoria-metrics-single"]["repository"],
         ),
@@ -418,7 +418,7 @@ vmsingle = k8s.helm.v3.Release(
                                             "__meta_kubernetes_service_name",
                                         ],
                                         "action": "keep",
-                                        "regex": "infra-apps;kube-state-metrics",
+                                        "regex": "monitoring;kube-state-metrics",
                                     },
                                     {
                                         "action": "labelmap",
@@ -467,7 +467,7 @@ vmsingle = k8s.helm.v3.Release(
                 },
             },
         },
-        timeout=300,
+        timeout=600,
     ),
 )
 # ---------------------------------------------------------------------------
@@ -479,18 +479,21 @@ kube_state_metrics = k8s.helm.v3.Release(
     k8s.helm.v3.ReleaseArgs(
         chart="kube-state-metrics",
         version=_chart_deps["kube-state-metrics"]["version"],
-        namespace="infra-apps",
-        create_namespace=False,  # created by infra-bootstrap
+        namespace="monitoring",
+        create_namespace=True,
         repository_opts=k8s.helm.v3.RepositoryOptsArgs(
             repo=_chart_deps["kube-state-metrics"]["repository"],
         ),
         values={
+            # Ensure the Service is named "kube-state-metrics" regardless of
+            # release name so the vmsingle scrape relabel regex matches reliably.
+            "fullnameOverride": "kube-state-metrics",
             "replicas": 1,
             "resources": {
                 "requests": {"cpu": "10m", "memory": "32Mi"},
                 "limits": {"cpu": "50m", "memory": "128Mi"},
             },
         },
-        timeout=300,
+        timeout=600,
     ),
 )
