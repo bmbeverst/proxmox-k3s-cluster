@@ -329,18 +329,14 @@ cert_manager = k8s.helm.v3.Release(
         timeout=600,
     ),
 )
-# ---------------------------------------------------------------------------
-# VictoriaMetrics Single — Prometheus-compatible TSDB with built-in scraping.
-# KRR auto-discovers it via the standard app.kubernetes.io/name=victoria-metrics-single label.
-# No Grafana, vmagent, Node Exporter, Alertmanager, logs, or traces.
-# ---------------------------------------------------------------------------
+# VictoriaMetrics Single Prometheus-compatible TSDB with built-in scraping for KRR.
 vmsingle = k8s.helm.v3.Release(
     "vmsingle",
     k8s.helm.v3.ReleaseArgs(
         chart="victoria-metrics-single",
         version=_chart_deps["victoria-metrics-single"]["version"],
-        namespace="infra-apps",
-        create_namespace=False,  # created by infra-bootstrap
+        namespace="monitoring",
+        create_namespace=True,
         repository_opts=k8s.helm.v3.RepositoryOptsArgs(
             repo=_chart_deps["victoria-metrics-single"]["repository"],
         ),
@@ -363,10 +359,6 @@ vmsingle = k8s.helm.v3.Release(
                                 "kubernetes_sd_configs": [{"role": "node"}],
                                 "scheme": "https",
                                 "tls_config": {
-                                    # Verified 2026-08-25: every node's kubelet cert is
-                                    # signed by the cluster CA and includes its node IP in
-                                    # SANs, so full TLS verification works (no
-                                    # insecure_skip_verify needed).
                                     "ca_file": "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt",
                                 },
                                 "bearer_token_file": "/var/run/secrets/kubernetes.io/serviceaccount/token",
@@ -381,25 +373,18 @@ vmsingle = k8s.helm.v3.Release(
                                         "source_labels": ["__meta_kubernetes_node_name"],
                                         "target_label": "node",
                                     },
-                                    # NOTE: do NOT rewrite __address__ here. Node-role SD
-                                    # already sets it to <node_ip>:<kubelet_port>; appending
-                                    # ":10250" would produce "<node_ip>:10250:10250" and
-                                    # break every kubelet scrape.
                                 ],
                                 "metric_relabel_configs": [
                                     {
                                         "source_labels": ["__name__"],
                                         "action": "keep",
-                                        # Only what KRR actually queries (verified against
-                                        # robusta-dev/krr prometheus integration):
+                                        # Only what KRR actually queries
                                         "regex": (
                                             "container_cpu_usage_seconds_total"
                                             "|container_memory_working_set_bytes"
                                         ),
                                     },
-                                    # Drop cgroup-aggregate series ("POD") and any kept series
-                                    # with no container label at all (anchored regex matches
-                                    # empty string too) — both double-count real containers.
+                                    # Drop cgroup-aggregate series ("POD") and no container labels both double-count real containers.
                                     {
                                         "source_labels": ["container"],
                                         "action": "drop",
@@ -418,7 +403,7 @@ vmsingle = k8s.helm.v3.Release(
                                             "__meta_kubernetes_service_name",
                                         ],
                                         "action": "keep",
-                                        "regex": "infra-apps;kube-state-metrics",
+                                        "regex": "monitoring;kube-state-metrics",
                                     },
                                     {
                                         "action": "labelmap",
@@ -437,9 +422,7 @@ vmsingle = k8s.helm.v3.Release(
                                     {
                                         "source_labels": ["__name__"],
                                         "action": "keep",
-                                        # Only what KRR actually queries. kube_job_owner covers
-                                        # CronJob scans; last_terminated_reason feeds KRR's
-                                        # OOMKill-aware memory analysis.
+                                        # Only what KRR actually queries
                                         "regex": (
                                             "kube_pod_owner"
                                             "|kube_replicaset_owner"
@@ -460,8 +443,6 @@ vmsingle = k8s.helm.v3.Release(
                     "storageClassName": "linstor-r2",
                 },
                 "resources": {
-                    # Generous limit: VM needs headroom for index merges and for answering
-                    # KRR's burst of range/subqueries; an OOMKill mid-scan loses the run.
                     "requests": {"cpu": "50m", "memory": "256Mi"},
                     "limits": {"cpu": "500m", "memory": "1Gi"},
                 },
@@ -470,21 +451,19 @@ vmsingle = k8s.helm.v3.Release(
         timeout=300,
     ),
 )
-# ---------------------------------------------------------------------------
-# kube-state-metrics — workload ownership/status metrics KRR needs to map
-# container usage back to Deployments, StatefulSets, DaemonSets, etc.
-# ---------------------------------------------------------------------------
+# kube-state-metrics — workload ownership/status metrics KRR needs
 kube_state_metrics = k8s.helm.v3.Release(
     "kube-state-metrics",
     k8s.helm.v3.ReleaseArgs(
         chart="kube-state-metrics",
         version=_chart_deps["kube-state-metrics"]["version"],
-        namespace="infra-apps",
-        create_namespace=False,  # created by infra-bootstrap
+        namespace="monitoring",
+        create_namespace=True,
         repository_opts=k8s.helm.v3.RepositoryOptsArgs(
             repo=_chart_deps["kube-state-metrics"]["repository"],
         ),
         values={
+            "fullnameOverride": "kube-state-metrics",
             "replicas": 1,
             "resources": {
                 "requests": {"cpu": "10m", "memory": "32Mi"},

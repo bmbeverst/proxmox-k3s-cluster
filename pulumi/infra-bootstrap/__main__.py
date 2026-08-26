@@ -53,14 +53,6 @@ namespace = Namespace(
     "pulumi-kubernetes-operator",
     metadata=ObjectMetaArgs(name="pulumi-kubernetes-operator"),
 )
-namespace = Namespace(
-    "infra-apps",
-    metadata=ObjectMetaArgs(name="infra-apps"),
-)
-namespace = Namespace(
-    "my-apps",
-    metadata=ObjectMetaArgs(name="my-apps"),
-)
 
 # Get the Pulumi API token.
 pulumi_config = Config()
