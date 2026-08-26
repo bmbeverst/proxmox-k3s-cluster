@@ -18,6 +18,12 @@ dependencies:
   - name: cert-manager
     repository: https://charts.jetstack.io
     version: v1.21.1
+  - name: victoria-metrics-single
+    repository: https://victoriametrics.github.io/helm-charts/
+    version: 0.45.0
+  - name: kube-state-metrics
+    repository: https://prometheus-community.github.io/helm-charts
+    version: 8.4.0
   - name: pulumi-kubernetes-operator
     repository: oci://ghcr.io/pulumi/helm-charts
     version: 2.9.0
