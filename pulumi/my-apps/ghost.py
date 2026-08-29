@@ -18,15 +18,14 @@ GHOST_IMAGE = f"ghost:{_versions['ghost_image_tag']}"
 
 NAMESPACE = "ghost"
 
-# One canonical URL for Ghost
+# One canonical URL for Ghost, served through the kube-vip LoadBalancer VIP.
 GHOST_NODE = "node3"
-GHOST_NODE_IP = "10.10.1.113"
-GHOST_NODE_PORT = "31681"
-GHOST_URL = f"http://{GHOST_NODE_IP}:{GHOST_NODE_PORT}"
+GHOST_LB_IP = "10.10.1.90"
+GHOST_URL = f"http://{GHOST_LB_IP}"
 
 
 def register(namespace):
-    """Create the Ghost workload, its content PVC and the NodePort Service.
+    """Create the Ghost workload, its content PVC and the LoadBalancer Service.
 
     `namespace` is the `ghost` Namespace resource owned by __main__.py.
     Ordering after the infra stacks is handled by PKO's Stack CR
@@ -125,19 +124,19 @@ def register(namespace):
         opts=pulumi.ResourceOptions(depends_on=[namespace, ghost_storage]),
     )
 
-    # ClusterIP + NodePort for local, insecure access this pass.
+    # LoadBalancer on static kube-vip VIP
     ghost_service = k8s.core.v1.Service(
         "ghost",
         metadata=ObjectMetaArgs(name="ghost", namespace=NAMESPACE),
         spec=k8s.core.v1.ServiceSpecArgs(
             selector={"app": "ghost"},
-            type="NodePort",
+            type="LoadBalancer",
+            load_balancer_ip=GHOST_LB_IP,
             ports=[
                 k8s.core.v1.ServicePortArgs(
                     name="http",
-                    port=2368,
+                    port=80,
                     target_port=2368,
-                    node_port=31681,
                 ),
             ],
         ),

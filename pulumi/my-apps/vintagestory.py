@@ -53,7 +53,7 @@ _vints_dockerconfig = pulumi.Output.all(_vints_registry_user, _vints_registry_to
 VS_VERSION = _versions["vintagestory_version"]
 VINTS_NODE = "node2"       # temp setting for testing
 VINTS_PORT = 42420
-VINTS_NODE_PORT = 30420
+VINTS_LB_IP = "10.10.1.91"  # kube-vip LoadBalancer VIP (static)
 VINTS_NFS_SERVER = "10.10.1.101"  # host serving the backup export
 VINTS_NFS_PATH = "/pvebackup"     # export; writable by uid 1001
 
@@ -238,21 +238,22 @@ def register(namespace):
         opts=pulumi.ResourceOptions(depends_on=[namespace, vints_regcred, vints_data, vints_config]),
     )
 
-    # NodePort so LAN clients can join. TCP+UDP on the game port, both mapped to
-    # one NodePort. Same single-node weak point as Ghost (no ingress/TLS yet).
+    # LoadBalancer on static kube-vip VIP 10.10.1.91 so LAN clients join the
+    # game on a single stable IP. TCP+UDP on the game port both map to the VIP.
     vints_service = k8s.core.v1.Service(
         "vints",
         metadata=ObjectMetaArgs(name="vints", namespace=NAMESPACE),
         spec=k8s.core.v1.ServiceSpecArgs(
             selector={"app": "vints"},
-            type="NodePort",
+            type="LoadBalancer",
+            load_balancer_ip=VINTS_LB_IP,
             ports=[
                 k8s.core.v1.ServicePortArgs(
                     name="game-tcp", port=VINTS_PORT, target_port=VINTS_PORT,
-                    protocol="TCP", node_port=VINTS_NODE_PORT),
+                    protocol="TCP"),
                 k8s.core.v1.ServicePortArgs(
                     name="game-udp", port=VINTS_PORT, target_port=VINTS_PORT,
-                    protocol="UDP", node_port=VINTS_NODE_PORT),
+                    protocol="UDP"),
             ],
         ),
         opts=pulumi.ResourceOptions(depends_on=[namespace, vints]),

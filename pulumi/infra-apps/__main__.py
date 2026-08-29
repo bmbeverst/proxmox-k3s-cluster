@@ -192,7 +192,7 @@ kured = k8s.helm.v3.Release(
 )
 
 
-# kube-vip HA control plane on 10.10.1.99
+# kube-vip: HA control plane and Service LoadBalancer support.
 kube_vip = k8s.helm.v3.Release(
     "kube-vip",
     k8s.helm.v3.ReleaseArgs(
@@ -209,7 +209,8 @@ kube_vip = k8s.helm.v3.Release(
                 "vip_arp": "true",
                 "vip_subnet": "32",
                 "cp_enable": "true",
-                "svc_enable": "false",
+                "svc_enable": "true",
+                "svc_election": "true",
                 "vip_leaderelection": "true",
                 "lb_enable": "false",
                 "vip_leaseduration": "5",
