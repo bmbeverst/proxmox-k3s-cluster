@@ -65,7 +65,6 @@ _vints_mods = """\
 # which is often just /latest). Changing the URL re-downloads; keeping the id
 # stable never collides. Prefix a line with '#' to disable a mod.
 # primitivesurvival (Primitive Survival by SpearAndFang) pinned to v5.1.2 for VS 1.22.x.
-primitivesurvival https://mods.vintagestory.at/download/115238/primitivesurvival_5.1.2.zip
 """
 
 
@@ -238,8 +237,7 @@ def register(namespace):
         opts=pulumi.ResourceOptions(depends_on=[namespace, vints_regcred, vints_data, vints_config]),
     )
 
-    # LoadBalancer on static kube-vip VIP 10.10.1.91 so LAN clients join the
-    # game on a single stable IP. TCP+UDP on the game port both map to the VIP.
+    # LoadBalancer on static kube-vip VIP
     vints_service = k8s.core.v1.Service(
         "vints",
         metadata=ObjectMetaArgs(name="vints", namespace=NAMESPACE),
@@ -260,9 +258,6 @@ def register(namespace):
     )
 
     # Backup: a CronJob that snapshots + tars the world and writes it to an NFS share
-    # outside the cluster. The PVC alone is NOT the safety net (bad mod / corrupt save).
-    # Runs on the same node as the server so the RWO world PVC can be mounted; the NFS
-    # share is RWM network storage mounted via a plain `nfs` volume (no PV/PVC).
     vints_backup = k8s.batch.v1.CronJob(
         "vints-backup",
         metadata=ObjectMetaArgs(name="vints-backup", namespace=NAMESPACE),

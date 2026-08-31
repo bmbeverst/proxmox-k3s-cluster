@@ -8,3 +8,7 @@ kubelet-arg:
 systemReserved:
   cpu: "100m" # Reserve 100 millicores for OS
   memory: "150Mi" # Reserve 150MB for system processes
+
+# kube-vip owns LoadBalancer VIPs, so ServiceLB must be off.
+disable:
+  - servicelb
