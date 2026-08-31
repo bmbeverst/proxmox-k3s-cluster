@@ -425,7 +425,8 @@ vmsingle = k8s.helm.v3.Release(
                                         "action": "keep",
                                         # Only what KRR actually queries
                                         "regex": (
-                                            "kube_pod_owner"
+                                            "kube_pod_info"
+                                            "|kube_pod_owner"
                                             "|kube_replicaset_owner"
                                             "|kube_job_owner"
                                             "|kube_pod_status_phase"
