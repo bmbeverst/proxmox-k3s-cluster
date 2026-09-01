@@ -8,7 +8,7 @@ dependencies:
     version: 6.1.0
   - name: kube-vip
     repository: https://kube-vip.github.io/helm-charts
-    version: 0.11.0
+    version: 0.11.1
   - name: piraeus
     repository: oci://ghcr.io/piraeusdatastore/piraeus-operator
     version: 2.11.0
