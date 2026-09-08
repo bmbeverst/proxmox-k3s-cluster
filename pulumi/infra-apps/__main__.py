@@ -445,8 +445,7 @@ vmsingle = k8s.helm.v3.Release(
                     "storageClassName": "linstor-r2",
                 },
                 "resources": {
-                    "requests": {"cpu": "50m", "memory": "256Mi"},
-                    "limits": {"cpu": "500m", "memory": "1Gi"},
+                    "requests": {"cpu": "50m", "memory": "512Mi"},
                 },
             },
         },
@@ -470,8 +469,7 @@ kube_state_metrics = k8s.helm.v3.Release(
             "fullnameOverride": "kube-state-metrics",
             "replicas": 1,
             "resources": {
-                "requests": {"cpu": "10m", "memory": "32Mi"},
-                "limits": {"cpu": "50m", "memory": "128Mi"},
+                "requests": {"cpu": "10m", "memory": "64Mi"},
             },
         },
         timeout=600,

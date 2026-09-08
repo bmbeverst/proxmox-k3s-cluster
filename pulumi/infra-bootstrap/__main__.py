@@ -131,6 +131,12 @@ pko = Release(
         namespace="pulumi-kubernetes-operator",
         version=_chart_deps["pulumi-kubernetes-operator"]["version"],
         create_namespace=True,  # Optional: creates namespace if it doesn't exist
+        values={
+            "resources": {
+                "requests": {"cpu": "200m", "memory": "256Mi"},
+                "limits": None,
+            },
+        },
         timeout=600,
         atomic=True,  # Rollback on failure
     ),
@@ -197,6 +203,9 @@ infra_apps = CustomResource(
                     {"name": "USER", "value": "root"},
                     {"name": "HOME", "value": "/share"},
                 ],
+                "resources": {
+                    "requests": {"cpu": "100m", "memory": "1Gi"},
+                },
             },
         },
     },
@@ -248,6 +257,9 @@ infra_bootstrap = CustomResource(
                     {"name": "USER", "value": "root"},
                     {"name": "HOME", "value": "/share"},
                 ],
+                "resources": {
+                    "requests": {"cpu": "100m", "memory": "1Gi"},
+                },
             },
         },
     },
@@ -303,6 +315,9 @@ my_apps = CustomResource(
                     {"name": "USER", "value": "root"},
                     {"name": "HOME", "value": "/share"},
                 ],
+                "resources": {
+                    "requests": {"cpu": "100m", "memory": "1Gi"},
+                },
             },
         },
     },
