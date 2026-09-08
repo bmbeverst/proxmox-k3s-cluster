@@ -343,7 +343,7 @@ vmsingle = k8s.helm.v3.Release(
         ),
         values={
             "server": {
-                "retentionPeriod": "14d",
+                "retentionPeriod": "60d",
                 "scrape": {
                     "enabled": True,
                     "config": {
@@ -383,6 +383,10 @@ vmsingle = k8s.helm.v3.Release(
                                         "regex": (
                                             "container_cpu_usage_seconds_total"
                                             "|container_memory_working_set_bytes"
+                                            "|container_network_transmit_bytes_total"
+                                            "|container_network_receive_bytes_total"
+                                            "|container_fs_writes_bytes_total"
+                                            "|container_fs_reads_bytes_total"
                                         ),
                                     },
                                     # "POD" and empty container labels both double-count real containers
