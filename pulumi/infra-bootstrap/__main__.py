@@ -134,7 +134,7 @@ pko = Release(
         values={
             "resources": {
                 "requests": {"cpu": "200m", "memory": "256Mi"},
-                "limits": None,
+                "limits": {"cpu": "500m", "memory": "512Mi"},
             },
         },
         timeout=600,
