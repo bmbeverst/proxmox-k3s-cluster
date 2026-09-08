@@ -84,6 +84,21 @@ suc = k8s.yaml.v2.ConfigFile(
     ),
 )
 
+# kube-vip-cloud-controller: assigns IPs from a pool to LoadBalancer services
+# that don't request one (e.g. kube-vip DS advertises addresses; this allocates).
+kvcp = k8s.yaml.v2.ConfigFile(
+    "kube-vip-cloud-controller",
+    file=f"https://raw.githubusercontent.com/kube-vip/kube-vip-cloud-provider/{_versions['kvcp_version']}/manifest/kube-vip-cloud-controller.yaml",
+)
+
+# Global pool for LoadBalancer service IP assignment (key: range-global).
+# Must not overlap existing VIPs: .60 traefik, .90 ghost, .91 vints, .99 control-plane.
+kvcp_pool = k8s.core.v1.ConfigMap(
+    "kubevip",
+    metadata={"name": "kubevip", "namespace": "kube-system"},
+    data={"range-global": "10.10.1.61-10.10.1.80"},
+    opts=ResourceOptions(depends_on=[kvcp]),
+)
 server_plan = CustomResource(
     "server-plan",
     api_version="upgrade.cattle.io/v1",

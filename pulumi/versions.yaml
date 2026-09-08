@@ -5,6 +5,9 @@
 # renovate: datasource=github-releases depName=rancher/system-upgrade-controller
 suc_version: v0.20.1
 
+# renovate: datasource=github-releases depName=kube-vip/kube-vip-cloud-provider
+kvcp_version: v0.0.12
+
 # renovate: datasource=docker depName=ghost
 ghost_image_tag: 6.57.1-alpine
 
