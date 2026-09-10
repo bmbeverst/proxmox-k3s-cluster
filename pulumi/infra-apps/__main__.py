@@ -228,9 +228,9 @@ kube_vip = k8s.helm.v3.Release(
                 "svc_election": "true",
                 "vip_leaderelection": "true",
                 "lb_enable": "false",
-                "vip_leaseduration": "5",
-                "vip_renewdeadline": "3",
-                "vip_retryperiod": "1",
+                "vip_leaseduration": "15",
+                "vip_renewdeadline": "10",
+                "vip_retryperiod": "2",
             },
             "envValueFrom": {
                 "vip_nodename": {"fieldRef": {"fieldPath": "spec.nodeName"}},
