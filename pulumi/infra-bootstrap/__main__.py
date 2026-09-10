@@ -18,6 +18,10 @@ from pulumi import Config, ResourceOptions
 # can bump the PKO chart version (the other charts live there too).
 with open(os.path.join(os.path.dirname(__file__), "..", "Chart.yaml")) as f:
     _chart_deps = {d["name"]: d for d in yaml.safe_load(f)["dependencies"]}
+
+with open(os.path.join(os.path.dirname(__file__), "..", "versions.yaml")) as f:
+    _versions = yaml.safe_load(f)
+_PKO_IMAGE = f"pulumi/pulumi-python:{_versions['pko_workspace_image_tag']}"
 _pko_chart = (
     _chart_deps["pulumi-kubernetes-operator"]["repository"]
     + "/"
@@ -194,9 +198,10 @@ infra_apps = CustomResource(
         "workspaceReclaimPolicy": "Delete",
         "destroyOnFinalize": True,
         "refresh": True,
+        "shallow": True,
         "workspaceTemplate": {
             "spec": {
-                "image": "pulumi/pulumi-python:latest",
+                "image": _PKO_IMAGE,
                 # pulumi/pulumi-python runs as root without $USER set; the
                 # pulumi CLI (CGO_ENABLED=0) needs USER to resolve the home path.
                 "env": [
@@ -248,9 +253,10 @@ infra_bootstrap = CustomResource(
         "workspaceReclaimPolicy": "Delete",
         "destroyOnFinalize": True,
         "refresh": True,
+        "shallow": True,
         "workspaceTemplate": {
             "spec": {
-                "image": "pulumi/pulumi-python:latest",
+                "image": _PKO_IMAGE,
                 # pulumi/pulumi-python runs as root without $USER set; the
                 # pulumi CLI (CGO_ENABLED=0) needs USER to resolve the home path.
                 "env": [
@@ -307,9 +313,10 @@ my_apps = CustomResource(
         "workspaceReclaimPolicy": "Delete",
         "destroyOnFinalize": True,
         "refresh": True,
+        "shallow": True,
         "workspaceTemplate": {
             "spec": {
-                "image": "pulumi/pulumi-python:latest",
+                "image": _PKO_IMAGE,
                 # Same USER/HOME workaround as infra-apps.
                 "env": [
                     {"name": "USER", "value": "root"},
