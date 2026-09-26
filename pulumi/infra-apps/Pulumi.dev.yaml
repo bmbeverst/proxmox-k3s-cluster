@@ -1,0 +1,9 @@
+config:
+  tailscale:authKey:
+    secure: AAABAKluaRQ3Gmi/wyeKdd2azDjdszWO29dmad4ZzdmI9AKWQF6vB+z1x0EGBiPlQtnVbbBof5lHc+O66b610JkfCcsabxGmIWD3sDBUi89FG69ELfiziL9ptIx/Jg==
+  infra-apps:authKey:
+    secure: AAABAJQsJs3XDLtbGcrWr6c4lNndnMwxNGgGCQ4VwhhdrnCqi1jzR30f+22TbU3NlQ==
+  tailscale:clientID:
+    secure: AAABAFJQJkH65viz4cQn56O9GfZGN/euXyctW1DIOTV+06/IW59Fi9T6hL6nTruKOA==
+  tailscale:clientSecret:
+    secure: AAABAJ79WiIv06YOa7Wh/d3ZVaXsL83FlxxZ5kWGi41ybY/JTPePqsp+lVrT6EuDxeRcECK/q2SEHqWIvCkCyisEWO7Q0Ar76xCHhqUfQuL34lfXBx51GHInPR7lIo0N

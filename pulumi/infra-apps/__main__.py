@@ -494,3 +494,50 @@ kube_state_metrics = k8s.helm.v3.Release(
         timeout=600,
     ),
 )
+
+# Tailscale operator. Auth is the OAuth client in stack config (tailscale:clientID /
+# tailscale:clientSecret); the chart also installs the tailscale.com CRDs.
+_tailscale_cfg = pulumi.Config("tailscale")
+
+tailscale_operator = k8s.helm.v3.Release(
+    "tailscale-operator",
+    k8s.helm.v3.ReleaseArgs(
+        chart="tailscale-operator",
+        version=_chart_deps["tailscale-operator"]["version"],
+        namespace="tailscale",
+        create_namespace=True,
+        repository_opts=k8s.helm.v3.RepositoryOptsArgs(
+            repo=_chart_deps["tailscale-operator"]["repository"],
+        ),
+        values={
+            "installCRDs": True,
+            "oauth": {
+                "clientId": _tailscale_cfg.require("clientID"),
+                "clientSecret": _tailscale_cfg.require_secret("clientSecret"),
+            },
+            "operatorConfig": {
+                "resources": {
+                    "requests": {"cpu": "50m", "memory": "128Mi"},
+                    "limits": {"memory": "256Mi"},
+                },
+            },
+        },
+        timeout=600,
+        atomic=True,
+    ),
+)
+
+# Connector: subnet router advertising only the vints kube-vip VIP to the tailnet.
+# Connectors are cluster-scoped, so metadata carries no namespace.
+vints_router = CustomResource(
+    "vints-router",
+    api_version="tailscale.com/v1alpha1",
+    kind="Connector",
+    metadata={"name": "vints-router"},
+    spec={
+        "replicas": 1,
+        "hostnamePrefix": "vints-router",
+        "subnetRouter": {"advertiseRoutes": ["10.10.1.91/32"]},
+    },
+    opts=ResourceOptions(depends_on=[tailscale_operator]),
+)
