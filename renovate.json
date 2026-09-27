@@ -64,7 +64,7 @@
       "versioning": "helm"
     },
     {
-      "description": "Vints Docker images from private GitLab registry: no minimumReleaseAge (tag age = creation time), only numeric semver tags",
+      "description": "Vints Docker images from private GitLab registry: no minimumReleaseAge (tag age = creation time). [skip ci] keeps a pin bump from retriggering CI/builds",
       "matchDatasources": [
         "docker"
       ],
@@ -76,7 +76,7 @@
         "pulumi/versions.yaml"
       ],
       "minimumReleaseAge": null,
-      "allowedVersions": "/^\\d+\\.\\d+\\.\\d+$/"
+      "commitMessageSuffix": "[skip ci]"
     },
     {
       "description": "Pulumi Kubernetes operator chart (infra-bootstrap): use timestamped GitHub chart releases for Pulumi Operator. Never automerge: review the MR, then run `pulumi up` in pulumi/infra-bootstrap/ (a PKO self-upgrade replaces the controller that is running the upgrade)",
