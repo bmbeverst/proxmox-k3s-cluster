@@ -429,14 +429,6 @@ vmsingle = k8s.helm.v3.Release(
                                         "action": "labelmap",
                                         "regex": "__meta_kubernetes_service_label_(.+)",
                                     },
-                                    {
-                                        "source_labels": ["__meta_kubernetes_namespace"],
-                                        "target_label": "namespace",
-                                    },
-                                    {
-                                        "source_labels": ["__meta_kubernetes_service_name"],
-                                        "target_label": "service",
-                                    },
                                 ],
                                 "metric_relabel_configs": [
                                     {
