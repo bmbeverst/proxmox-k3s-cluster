@@ -163,9 +163,12 @@ def register(namespace):
         metadata=ObjectMetaArgs(name="vints", namespace=NAMESPACE),
         spec=k8s.apps.v1.DeploymentSpecArgs(
             replicas=1,
-            # Single replica with a ReadWriteOnce volume: a surge pod could be
-            # scheduled onto the other replica node and deadlock on Multi-Attach.
-            strategy=k8s.apps.v1.DeploymentStrategyArgs(type="Recreate"),
+            # delete-then-create instead of two servers on save
+            strategy=k8s.apps.v1.DeploymentStrategyArgs(
+                type="RollingUpdate",
+                rolling_update=k8s.apps.v1.RollingUpdateDeploymentArgs(
+                    max_surge=0, max_unavailable=1),
+            ),
             selector=k8s.meta.v1.LabelSelectorArgs(match_labels={"app": "vints"}),
             template=k8s.core.v1.PodTemplateSpecArgs(
                 metadata=ObjectMetaArgs(labels={"app": "vints"}),
