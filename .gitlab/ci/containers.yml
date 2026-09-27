@@ -4,74 +4,110 @@
 build:vints:
   stage: build
   image: quay.io/containers/buildah:v1.43.2-immutable
+  # "max patch + 1" is read-then-write: serialise so two pipelines can't compute the same tag.
+  resource_group: build-vints-server
   script:
     - |
       set -euo pipefail
-      # Read the deployed tag from versions.yaml; extract major.minor as the version track
+      # skopeo handles registry auth and pagination; the buildah image doesn't ship it.
+      dnf -y -q install skopeo jq
+      REPO="$CI_REGISTRY_IMAGE/vints-server"
+      # The deployed tag's major.minor is the version track. versions.yaml is repo content, so
+      # validate its shape before the value is used. Moving the track also needs a change under
+      # pulumi/my-apps/containers/server/, because versions.yaml no longer triggers a build.
       TAG=$(grep '^vints_server_image_tag:' pulumi/versions.yaml | awk '{print $2}')
-      BASE="${TAG%.*}"
-      # Query the GitLab container registry (Docker Registry HTTP API v2) for existing tags
-      REGISTRY_TAGS=$(curl -s -u "$CI_REGISTRY_USER:$CI_REGISTRY_PASSWORD" \
-        "https://registry.gitlab.com/v2/proxmox-k3s/proxmox-k3s-cluster/vints-server/tags/list" \
-        2>/dev/null | grep -o '"tags":\[.*\]' | grep -o '"[^"]*"' | tr -d '"' \
-        | grep -E "^$BASE\." | sed 's/^.*\.//' | sort -n | tail -1 || true)
-      NEXT_PATCH=$(( ${REGISTRY_TAGS:-0} + 1 ))
-      FULL_TAG="$BASE.$NEXT_PATCH"
-      echo "Building $CI_REGISTRY_IMAGE/vints-server:$FULL_TAG (track $BASE, next patch $NEXT_PATCH)"
+      printf '%s' "$TAG" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' \
+        || { echo "FATAL: vints_server_image_tag in pulumi/versions.yaml is not X.Y.Z"; exit 1; }
+      MAJOR="${TAG%%.*}"; REST="${TAG#*.}"; MINOR="${REST%%.*}"
+      # skopeo follows the registry's Link pagination, so this is every tag in the repo.
+      TAGS=$(skopeo list-tags --retry-times 3 \
+        --creds "$CI_REGISTRY_USER:$CI_REGISTRY_PASSWORD" "docker://$REPO" | jq -r '.Tags[]') \
+        || { echo "FATAL: could not read vints-server tags from the registry"; exit 1; }
+      MAX_PATCH=$(printf '%s\n' "$TAGS" | grep -E "^${MAJOR}\.${MINOR}\.[0-9]+$" \
+        | sed 's/^.*\.//' | sort -n | tail -1)
+      FULL_TAG="${MAJOR}.${MINOR}.$(( ${MAX_PATCH:-0} + 1 ))"
+      echo "Building $REPO:$FULL_TAG (track ${MAJOR}.${MINOR})"
       buildah build --storage-driver=vfs --isolation=chroot \
-        --tag "$CI_REGISTRY_IMAGE/vints-server:$FULL_TAG" \
-        --tag "$CI_REGISTRY_IMAGE/vints-server:latest" \
+        --tag "$REPO:$FULL_TAG" \
+        --tag "$REPO:latest" \
         pulumi/my-apps/containers/server
+      # A published tag is never re-pushed: pods pull with imagePullPolicy: Always, so a re-push
+      # silently changes what runs with no versions.yaml change. Re-read now that the build is done.
+      LATEST_TAGS=$(skopeo list-tags --retry-times 3 \
+        --creds "$CI_REGISTRY_USER:$CI_REGISTRY_PASSWORD" "docker://$REPO" | jq -r '.Tags[]') \
+        || { echo "FATAL: could not re-read vints-server tags before pushing"; exit 1; }
+      if printf '%s\n' "$LATEST_TAGS" | grep -qx "$FULL_TAG"; then
+        echo "FATAL: vints-server:$FULL_TAG was published while building; refusing to overwrite"; exit 1
+      fi
       buildah push --storage-driver=vfs \
         --creds "$CI_REGISTRY_USER:$CI_REGISTRY_PASSWORD" \
-        "$CI_REGISTRY_IMAGE/vints-server:$FULL_TAG" \
-        "docker://$CI_REGISTRY_IMAGE/vints-server:$FULL_TAG"
+        "$REPO:$FULL_TAG" \
+        "docker://$REPO:$FULL_TAG"
       buildah push --storage-driver=vfs \
         --creds "$CI_REGISTRY_USER:$CI_REGISTRY_PASSWORD" \
-        "$CI_REGISTRY_IMAGE/vints-server:latest" \
-        "docker://$CI_REGISTRY_IMAGE/vints-server:latest"
+        "$REPO:latest" \
+        "docker://$REPO:latest"
   rules:
+    # versions.yaml is Renovate's output (the deploy pin), so it is not a build trigger: a pin
+    # bump would rebuild -> publish a new tag -> Renovate bump -> rebuild, forever.
     - if: $CI_PIPELINE_SOURCE == "push"
       changes:
         - pulumi/my-apps/containers/server/**
-        - pulumi/versions.yaml
         - .gitlab/ci/containers.yml
     - when: never
 
 build:vints-backup:
   stage: build
   image: quay.io/containers/buildah:v1.43.2-immutable
+  # "max patch + 1" is read-then-write: serialise so two pipelines can't compute the same tag.
+  resource_group: build-vints-backup
   script:
     - |
       set -euo pipefail
-      # Read the deployed tag from versions.yaml; extract major.minor as the version track
+      # skopeo handles registry auth and pagination; the buildah image doesn't ship it.
+      dnf -y -q install skopeo jq
+      REPO="$CI_REGISTRY_IMAGE/vints-backup"
+      # The deployed tag's major.minor is the version track. versions.yaml is repo content, so
+      # validate its shape before the value is used. Moving the track also needs a change under
+      # pulumi/my-apps/containers/backup/, because versions.yaml no longer triggers a build.
       TAG=$(grep '^vints_backup_image_tag:' pulumi/versions.yaml | awk '{print $2}')
-      BASE="${TAG%.*}"
-      # Query the GitLab container registry (Docker Registry HTTP API v2) for existing tags
-      REGISTRY_TAGS=$(curl -s -u "$CI_REGISTRY_USER:$CI_REGISTRY_PASSWORD" \
-        "https://registry.gitlab.com/v2/proxmox-k3s/proxmox-k3s-cluster/vints-backup/tags/list" \
-        2>/dev/null | grep -o '"tags":\[.*\]' | grep -o '"[^"]*"' | tr -d '"' \
-        | grep -E "^$BASE\." | sed 's/^.*\.//' | sort -n | tail -1 || true)
-      NEXT_PATCH=$(( ${REGISTRY_TAGS:-0} + 1 ))
-      FULL_TAG="$BASE.$NEXT_PATCH"
-      echo "Building $CI_REGISTRY_IMAGE/vints-backup:$FULL_TAG (track $BASE, next patch $NEXT_PATCH)"
+      printf '%s' "$TAG" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' \
+        || { echo "FATAL: vints_backup_image_tag in pulumi/versions.yaml is not X.Y.Z"; exit 1; }
+      MAJOR="${TAG%%.*}"; REST="${TAG#*.}"; MINOR="${REST%%.*}"
+      # skopeo follows the registry's Link pagination, so this is every tag in the repo.
+      TAGS=$(skopeo list-tags --retry-times 3 \
+        --creds "$CI_REGISTRY_USER:$CI_REGISTRY_PASSWORD" "docker://$REPO" | jq -r '.Tags[]') \
+        || { echo "FATAL: could not read vints-backup tags from the registry"; exit 1; }
+      MAX_PATCH=$(printf '%s\n' "$TAGS" | grep -E "^${MAJOR}\.${MINOR}\.[0-9]+$" \
+        | sed 's/^.*\.//' | sort -n | tail -1)
+      FULL_TAG="${MAJOR}.${MINOR}.$(( ${MAX_PATCH:-0} + 1 ))"
+      echo "Building $REPO:$FULL_TAG (track ${MAJOR}.${MINOR})"
       buildah build --storage-driver=vfs --isolation=chroot \
-        --tag "$CI_REGISTRY_IMAGE/vints-backup:$FULL_TAG" \
-        --tag "$CI_REGISTRY_IMAGE/vints-backup:latest" \
+        --tag "$REPO:$FULL_TAG" \
+        --tag "$REPO:latest" \
         pulumi/my-apps/containers/backup
+      # A published tag is never re-pushed: pods pull with imagePullPolicy: Always, so a re-push
+      # silently changes what runs with no versions.yaml change. Re-read now that the build is done.
+      LATEST_TAGS=$(skopeo list-tags --retry-times 3 \
+        --creds "$CI_REGISTRY_USER:$CI_REGISTRY_PASSWORD" "docker://$REPO" | jq -r '.Tags[]') \
+        || { echo "FATAL: could not re-read vints-backup tags before pushing"; exit 1; }
+      if printf '%s\n' "$LATEST_TAGS" | grep -qx "$FULL_TAG"; then
+        echo "FATAL: vints-backup:$FULL_TAG was published while building; refusing to overwrite"; exit 1
+      fi
       buildah push --storage-driver=vfs \
         --creds "$CI_REGISTRY_USER:$CI_REGISTRY_PASSWORD" \
-        "$CI_REGISTRY_IMAGE/vints-backup:$FULL_TAG" \
-        "docker://$CI_REGISTRY_IMAGE/vints-backup:$FULL_TAG"
+        "$REPO:$FULL_TAG" \
+        "docker://$REPO:$FULL_TAG"
       buildah push --storage-driver=vfs \
         --creds "$CI_REGISTRY_USER:$CI_REGISTRY_PASSWORD" \
-        "$CI_REGISTRY_IMAGE/vints-backup:latest" \
-        "docker://$CI_REGISTRY_IMAGE/vints-backup:latest"
+        "$REPO:latest" \
+        "docker://$REPO:latest"
   rules:
+    # versions.yaml is Renovate's output (the deploy pin), so it is not a build trigger: a pin
+    # bump would rebuild -> publish a new tag -> Renovate bump -> rebuild, forever.
     - if: $CI_PIPELINE_SOURCE == "push"
       changes:
         - pulumi/my-apps/containers/backup/**
-        - pulumi/versions.yaml
         - .gitlab/ci/containers.yml
     - when: never
 
@@ -115,6 +151,9 @@ smoke:vints:
     - if: $CI_PIPELINE_SOURCE == "push"
       changes:
         - pulumi/my-apps/containers/server/**
+        # A Vintage Story version bump rolls the pods on merge (VS_VERSION is a pod-template env),
+        # so it has to be smoke-tested even though the image itself hasn't changed.
+        - pulumi/versions.yaml
         - .gitlab/ci/containers.yml
     - when: never
   script:
