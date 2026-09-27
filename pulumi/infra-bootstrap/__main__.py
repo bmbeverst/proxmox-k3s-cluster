@@ -138,7 +138,8 @@ pko = Release(
         values={
             "resources": {
                 "requests": {"cpu": "200m", "memory": "256Mi"},
-                "limits": {"memory": "512Mi"},
+                # Only set to override the chart's 200m default: CPU should have no limit.
+                "limits": {"cpu": "1", "memory": "512Mi"},
             },
         },
         timeout=600,
@@ -196,7 +197,7 @@ infra_apps = CustomResource(
             },
         },
         "workspaceReclaimPolicy": "Delete",
-        "destroyOnFinalize": True,
+        "destroyOnFinalize": False,
         "refresh": True,
         "shallow": True,
         "workspaceTemplate": {
@@ -251,7 +252,7 @@ infra_bootstrap = CustomResource(
             },
         },
         "workspaceReclaimPolicy": "Delete",
-        "destroyOnFinalize": True,
+        "destroyOnFinalize": False,
         "refresh": True,
         "shallow": True,
         "workspaceTemplate": {
@@ -311,7 +312,7 @@ my_apps = CustomResource(
             },
         },
         "workspaceReclaimPolicy": "Delete",
-        "destroyOnFinalize": True,
+        "destroyOnFinalize": False,
         "refresh": True,
         "shallow": True,
         "workspaceTemplate": {
