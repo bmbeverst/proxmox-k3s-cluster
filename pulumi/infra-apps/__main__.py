@@ -359,6 +359,7 @@ vmsingle = k8s.helm.v3.Release(
         values={
             "server": {
                 "retentionPeriod": "60d",
+                "extraArgs": {"promscrape.configCheckInterval": "1m"},
                 "scrape": {
                     "enabled": True,
                     "config": {
