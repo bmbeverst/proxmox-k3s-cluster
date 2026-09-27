@@ -34,7 +34,7 @@ ON_BOOT = False
 
 # Hardware / network defaults.
 CORES = 3
-MEMORY_MB = 7168   # 7 GiB; no floating = no balloon (non-ballooning)
+MEMORY_MB = 9216   # 9 GiB; matches the running VMs (no floating = no balloon)
 BRIDGE = "vmbr0"
 GATEWAY = "10.10.1.1"
 

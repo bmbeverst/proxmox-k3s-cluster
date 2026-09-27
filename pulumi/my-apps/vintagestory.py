@@ -51,7 +51,7 @@ _vints_dockerconfig = pulumi.Output.all(_vints_registry_user, _vints_registry_to
     lambda ut: _vints_dockerconfigjson(ut[0], ut[1]))
 
 VS_VERSION = _versions["vintagestory_version"]
-VINTS_NODE = "node2"       # temp setting for testing
+VINTS_PREFERRED_NODES = ["node1", "node2"]
 VINTS_PORT = 42420
 VINTS_LB_IP = "10.10.1.91"  # kube-vip LoadBalancer VIP (static)
 VINTS_NFS_SERVER = "10.10.1.101"  # host serving the backup export
@@ -75,6 +75,48 @@ def _vints_env():
         {"name": "DATA_PATH", "value": "/data"},
         {"name": "PORT", "value": str(VINTS_PORT)},
     ]
+
+
+def _vints_preferred_nodes():
+    """Prefer the nodes holding a diskful vints-data replica, without pinning.
+    """
+    return k8s.core.v1.AffinityArgs(
+        node_affinity=k8s.core.v1.NodeAffinityArgs(
+            preferred_during_scheduling_ignored_during_execution=[
+                k8s.core.v1.PreferredSchedulingTermArgs(
+                    weight=100,
+                    preference=k8s.core.v1.NodeSelectorTermArgs(
+                        match_expressions=[
+                            k8s.core.v1.NodeSelectorRequirementArgs(
+                                key="kubernetes.io/hostname",
+                                operator="In",
+                                values=VINTS_PREFERRED_NODES,
+                            ),
+                        ],
+                    ),
+                ),
+            ],
+        ),
+    )
+
+
+def _vints_backup_placement():
+    """Run the backup on the node that already has vints-data attached.
+
+    The PVC is ReadWriteOnce, so a second pod on another node cannot attach it.
+    """
+    return k8s.core.v1.AffinityArgs(
+        pod_affinity=k8s.core.v1.PodAffinityArgs(
+            required_during_scheduling_ignored_during_execution=[
+                k8s.core.v1.PodAffinityTermArgs(
+                    topology_key="kubernetes.io/hostname",
+                    label_selector=k8s.meta.v1.LabelSelectorArgs(
+                        match_labels={"app": "vints"},
+                    ),
+                ),
+            ],
+        ),
+    )
 
 
 def register(namespace):
@@ -121,11 +163,14 @@ def register(namespace):
         metadata=ObjectMetaArgs(name="vints", namespace=NAMESPACE),
         spec=k8s.apps.v1.DeploymentSpecArgs(
             replicas=1,
+            # Single replica with a ReadWriteOnce volume: a surge pod could be
+            # scheduled onto the other replica node and deadlock on Multi-Attach.
+            strategy=k8s.apps.v1.DeploymentStrategyArgs(type="Recreate"),
             selector=k8s.meta.v1.LabelSelectorArgs(match_labels={"app": "vints"}),
             template=k8s.core.v1.PodTemplateSpecArgs(
                 metadata=ObjectMetaArgs(labels={"app": "vints"}),
                 spec=k8s.core.v1.PodSpecArgs(
-                    node_selector={"kubernetes.io/hostname": VINTS_NODE},
+                    affinity=_vints_preferred_nodes(),
                     termination_grace_period_seconds=30,
                     security_context=k8s.core.v1.PodSecurityContextArgs(
                         run_as_user=1001,
@@ -300,7 +345,7 @@ def register(namespace):
                         metadata=ObjectMetaArgs(labels={"app": "vints-backup"}),
                         spec=k8s.core.v1.PodSpecArgs(
                             restart_policy="OnFailure",
-                            node_selector={"kubernetes.io/hostname": VINTS_NODE},
+                            affinity=_vints_backup_placement(),
                             security_context=k8s.core.v1.PodSecurityContextArgs(
                                 fs_group=1001, run_as_user=1001),
                             image_pull_secrets=[

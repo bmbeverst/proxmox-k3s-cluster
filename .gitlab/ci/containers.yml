@@ -164,6 +164,8 @@ smoke:vints:
       done
       [ -n "$ok" ] || { echo "--- boot output (no 'create new save game data') ---"; tail -80 "$D/boot.log"; die "server did not start creating the world"; }
       if grep -qi NullReferenceException "$D/boot.log"; then tail -80 "$D/boot.log"; die "NullReferenceException detected"; fi
+      grep -q '"ServerAutoSave": 900' "$D/data/servermagicnumbers.json" \
+        || { echo "--- servermagicnumbers.json ---"; cat "$D/data/servermagicnumbers.json"; die "ServerAutoSave not raised"; }
       echo "server smoke OK"
     - podman rm -f smoke-vints >/dev/null 2>&1 || true
 
@@ -185,6 +187,8 @@ smoke:vints-backup:
       mkdir -p "$D/data/Saves" "$D/dest" "$D/tmp"
       printf 'world' > "$D/data/Saves/seed.vcdbs"
       printf '{}' > "$D/data/serverconfig.json"
+      # A run killed mid-tar leaves its .part behind; the prune glob never matches it.
+      printf 'stale' > "$D/dest/saves-20000101T000000Z.tar.gz.part"
       podman run --rm -u 0 \
         -e DATA_PATH=/data -e BACKUP_DEST=/backups \
         -v "$D/data":/data -v "$D/dest":/backups -v "$D/tmp":/tmp \
@@ -198,4 +202,7 @@ smoke:vints-backup:
         || { echo "backup smoke FAILED: world missing from tar"; cat "$D/members.txt"; exit 1; }
       grep -qx 'serverconfig.json' "$D/members.txt" \
         || { echo "backup smoke FAILED: serverconfig.json missing from tar"; cat "$D/members.txt"; exit 1; }
+      # Stale .part files from a killed run must be swept, not left to accumulate.
+      [ ! -f "$D/dest/saves-20000101T000000Z.tar.gz.part" ] \
+        || { echo "backup smoke FAILED: stale .part not cleaned up"; ls -la "$D/dest"; exit 1; }
       echo "backup smoke OK"

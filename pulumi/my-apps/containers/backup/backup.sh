@@ -10,6 +10,10 @@ BACKUP_DEST="${BACKUP_DEST:?BACKUP_DEST required}"   # mount path of the NFS sha
 SNAP="$DATA_PATH/.backup-snap"
 TS="$(date -u +%Y%m%dT%H%M%SZ)"
 
+# A run killed mid-tar leaves its .part behind, and the prune glob below only
+# matches saves-*.tar.gz, so sweep stale parts before writing this run's one.
+rm -f "$BACKUP_DEST"/saves-*.tar.gz.part
+
 if [[ ! -d "$DATA_PATH/Saves" ]]; then
   echo "[backup] no Saves dir yet; nothing to back up"
   exit 0
