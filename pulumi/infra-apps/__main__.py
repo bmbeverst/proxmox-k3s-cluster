@@ -307,7 +307,7 @@ piraeus = k8s.helm.v3.Release(
                 {
                     # local-path stays the default SC; linstor is opt-in per PVC
                     "name": "linstor-r2",
-                    "reclaimPolicy": "Delete",
+                    "reclaimPolicy": "Retain",
                     "allowVolumeExpansion": True,
                     "volumeBindingMode": "WaitForFirstConsumer",
                     "provisioner": "linstor.csi.linbit.com",
