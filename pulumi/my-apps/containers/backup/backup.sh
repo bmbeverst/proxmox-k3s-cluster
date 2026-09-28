@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Daily CronJob: snapshot the world (Saves/ + serverconfig.json), tar it, and write it
-# to an NFS share (atomic rename on the share). Retains the 7 newest backups.
+# Daily CronJob: snapshot the world + the config beside it (Saves/, serverconfig.json,
+# Playerdata/, ModConfig/), tar it, and write it to an NFS share (atomic rename on
+# the share). Retains the 7 newest backups.
 # Members mirror $DATA_PATH, so a restore is one command: tar -xzf saves-<ts>.tar.gz -C /data
 # Runs under /bin/sh (busybox ash in the image): no bash arrays/bashisms.
 set -euo pipefail
@@ -30,6 +31,16 @@ if [[ -f "$DATA_PATH/serverconfig.json" ]]; then
   cp -a "$DATA_PATH/serverconfig.json" "$SNAP/serverconfig.json"
   members="$members serverconfig.json"
 fi
+
+# Whitelist/bans/player data and per-mod settings live beside the world, not inside
+# it: a restore without them locks players out (or lets banned ones back in) or
+# silently reverts the mods' config.
+for d in Playerdata ModConfig; do
+  if [[ -d "$DATA_PATH/$d" ]]; then
+    cp -a "$DATA_PATH/$d" "$SNAP/$d"
+    members="$members $d"
+  fi
+done
 
 tmp="$BACKUP_DEST/saves-$TS.tar.gz.part"
 final="$BACKUP_DEST/saves-$TS.tar.gz"
