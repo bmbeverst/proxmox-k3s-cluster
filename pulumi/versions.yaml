@@ -1,7 +1,6 @@
 # Each value is preceded by a `# renovate:`
 # The comment plus the following YAML value pair provide datasource, depName, and the currentValue.
 
-
 # renovate: datasource=github-releases depName=rancher/system-upgrade-controller
 suc_version: v0.20.1
 
@@ -11,14 +10,9 @@ kvcp_version: v0.0.12
 # renovate: datasource=docker depName=ghost
 ghost_image_tag: 6.57.1-alpine
 
-# renovate: datasource=custom.custom-vintagestory depName=vintagestory
-vintagestory_version: 1.22.7
-
-# --- vints-server ---
 # renovate: datasource=docker depName=registry.gitlab.com/proxmox-k3s/proxmox-k3s-cluster/vints-server
-vints_server_image_tag: 1.0.1
+vints_server_image_tag: 1.0.2
 
-# --- vints-backup ---
 # renovate: datasource=docker depName=registry.gitlab.com/proxmox-k3s/proxmox-k3s-cluster/vints-backup
 vints_backup_image_tag: 1.0.1
 
