@@ -65,20 +65,6 @@
       "versioning": "helm"
     },
     {
-      "description": "Vints images: [skip ci] so a pin bump does not retrigger CI",
-      "matchDatasources": [
-        "docker"
-      ],
-      "matchDepNames": [
-        "registry.gitlab.com/proxmox-k3s/proxmox-k3s-cluster/vints-server",
-        "registry.gitlab.com/proxmox-k3s/proxmox-k3s-cluster/vints-backup"
-      ],
-      "matchFileNames": [
-        "pulumi/versions.yaml"
-      ],
-      "commitMessageSuffix": "[skip ci]"
-    },
-    {
       "description": "pyproject floors: bump the >= lower bounds",
       "matchManagers": [
         "pep621"
