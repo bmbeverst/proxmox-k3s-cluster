@@ -48,8 +48,6 @@ renovate:
     RENOVATE_DETECT_HOST_RULES_FROM_ENV: "true"
     DOCKER_REGISTRY_GITLAB_COM_USERNAME: "gitlab-ci-token"
     DOCKER_REGISTRY_GITLAB_COM_PASSWORD: $CI_JOB_TOKEN
-    # GitHub token (masked CI/CD variable); without it github-releases deps are skipped.
-    GITHUB_COM_TOKEN: $GITHUB_COM_TOKEN
   script:
     - renovate
   only:
