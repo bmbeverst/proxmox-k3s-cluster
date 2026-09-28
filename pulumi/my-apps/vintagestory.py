@@ -4,9 +4,8 @@
   an init container only syncs mods every pod start, and the game
   version is whatever the image tag says.
 - World/config/mods persisted on the StorageClass
-- Backup = a CronJob at midnight ET that stops the Deployment, tars the quiesced world
-  + config (`Saves/`, `serverconfig.json`, `Playerdata/`, `ModConfig/`) to an NFS share
-  outside the cluster, and starts the Deployment again (the daily reboot).
+- Backup = a CronJob at midnight ET: stops the Deployment, tars the world + config to an
+  NFS share, starts the Deployment again.
 
 """
 
@@ -322,8 +321,7 @@ def register(namespace):
         opts=pulumi.ResourceOptions(depends_on=[namespace, vints]),
     )
 
-    # The backup job stops the server for the duration of the tar (containers/backup/
-    # nightly.sh), so it may scale this one Deployment and watch its pods - nothing more.
+    # The backup job stops the server, so it may scale this Deployment and watch its pods.
     vints_backup_sa = k8s.core.v1.ServiceAccount(
         "vints-backup",
         metadata=ObjectMetaArgs(name="vints-backup", namespace=NAMESPACE),
@@ -360,9 +358,8 @@ def register(namespace):
         opts=pulumi.ResourceOptions(depends_on=[vints_backup_sa, vints_backup_role]),
     )
 
-    # Nightly maintenance: the CronJob stops the Deployment, tars the quiesced world +
-    # config to the NFS share, then starts the Deployment again (the daily reboot).
-    # 00:00 America/New_York via the CronJob's timeZone field, so DST is the cluster's job.
+    # Nightly: stop the Deployment, tar the world to NFS, start it again.
+    # 00:00 America/New_York, so DST is the cluster's job.
     vints_backup = k8s.batch.v1.CronJob(
         "vints-backup",
         metadata=ObjectMetaArgs(name="vints-backup", namespace=NAMESPACE),
@@ -372,10 +369,10 @@ def register(namespace):
             concurrency_policy="Forbid",
             job_template=k8s.batch.v1.JobTemplateSpecArgs(
                 spec=k8s.batch.v1.JobSpecArgs(
-                    # One attempt: a retry would stop the server a second time for nothing.
+                    # One attempt: a retry would stop the server again.
                     backoff_limit=0,
                     active_deadline_seconds=3600,
-                    # The finished Job removes itself a day later; its log is the record.
+                    # The finished Job deletes itself a day later.
                     ttl_seconds_after_finished=86400,
                     template=k8s.core.v1.PodTemplateSpecArgs(
                         metadata=ObjectMetaArgs(labels={"app": "vints-backup"}),
@@ -393,16 +390,12 @@ def register(namespace):
                                     name="vints-backup",
                                     image=VINTS_BACKUP_IMAGE,
                                     image_pull_policy="Always",
-                                    # The image's entrypoint is the tar itself; the nightly
-                                    # job wraps it in stop/start (containers/backup/nightly.sh).
-                                    command=["/bin/sh", "/nightly.sh"],
                                     env=[
                                         {"name": "DATA_PATH", "value": "/data"},
                                         {"name": "BACKUP_DEST", "value": "/backups"},
                                         {"name": "NAMESPACE", "value": NAMESPACE},
                                         {"name": "DEPLOYMENT", "value": "vints"},
-                                        # kubectl wants no home dir here, and the rootfs is
-                                        # read-only: point it at the tmp emptyDir.
+                                        # kubectl needs a writable HOME; the rootfs is read-only.
                                         {"name": "HOME", "value": "/tmp"},
                                     ],
                                     resources=k8s.core.v1.ResourceRequirementsArgs(
