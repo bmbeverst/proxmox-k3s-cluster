@@ -3,7 +3,7 @@
 
 build:vints:
   stage: build
-  image: quay.io/containers/buildah:v1.43.2-immutable
+  image: quay.io/containers/buildah:v1.43.4-immutable
   # "max patch + 1" is read-then-write: serialise so two pipelines can't compute the same tag.
   resource_group: build-vints-server
   script:
@@ -71,7 +71,7 @@ build:vints:
 
 build:vints-backup:
   stage: build
-  image: quay.io/containers/buildah:v1.43.2-immutable
+  image: quay.io/containers/buildah:v1.43.4-immutable
   resource_group: build-vints-backup
   script:
     - |
