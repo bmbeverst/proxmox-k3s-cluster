@@ -1,0 +1,12 @@
+# The Vintage Story version baked into the vints-server image at build time.
+#
+# CI resolves this version's https CDN artifact URL + published md5 from the official index
+# (https://api.vintagestory.at/stable-unstable.json) and the Dockerfile verifies both while it
+# extracts, so the image tag pins the exact game bytes and the running pod never downloads it.
+#
+# Renovate bumps this pin on new releases. It lives in the build context on purpose: a bump
+# under pulumi/my-apps/containers/server/ is what triggers the build + smoke test, while
+# pulumi/versions.yaml stays Renovate's deploy pin so a tag bump cannot rebuild -> publish ->
+# bump -> rebuild forever.
+# renovate: datasource=custom.custom-vintagestory depName=vintagestory
+vintagestory_version: 1.22.7

@@ -103,7 +103,8 @@
     {
       "customType": "regex",
       "managerFilePatterns": [
-        "/pulumi/versions\\.yaml$/"
+        "/pulumi/versions\\.yaml$/",
+        "/pulumi/my-apps/containers/server/vintagestory-version\\.yaml$/"
       ],
       "matchStrings": [
         "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+).*\\r?\\n\\s*[A-Za-z0-9_]+:\\s*[\"']?(?<currentValue>[^\\s\"']+)[\"']?"
@@ -116,7 +117,7 @@
   "customDatasources": {
     "custom-vintagestory": {
       "format": "json",
-      "defaultRegistryUrlTemplate": "http://api.vintagestory.at/stable-unstable.json",
+      "defaultRegistryUrlTemplate": "https://api.vintagestory.at/stable-unstable.json",
       "transformTemplates": [
         "{\"releases\": $map($keys($), function($v) {({\"version\": $v})})}"
       ]
