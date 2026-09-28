@@ -4,8 +4,9 @@
   an init container only syncs mods every pod start, and the game
   version is whatever the image tag says.
 - World/config/mods persisted on the StorageClass
-- Backup = a CronJob that hard-link snapshots `Saves/`, tars it and writes it to
-  an NFS share outside the cluster.
+- Backup = a CronJob at midnight ET that stops the Deployment, tars the quiesced world
+  + config (`Saves/`, `serverconfig.json`, `Playerdata/`, `ModConfig/`) to an NFS share
+  outside the cluster, and starts the Deployment again (the daily reboot).
 
 """
 
@@ -18,6 +19,7 @@ import yaml
 import pulumi
 import pulumi_kubernetes as k8s
 import pulumi_kubernetes.batch as k8s_batch  # for the backup CronJob
+import pulumi_kubernetes.rbac as k8s_rbac    # for the backup CronJob's RBAC
 from pulumi_kubernetes.meta.v1 import ObjectMetaArgs
 
 with open(os.path.join(os.path.dirname(__file__), "..", "versions.yaml")) as f:
@@ -320,21 +322,66 @@ def register(namespace):
         opts=pulumi.ResourceOptions(depends_on=[namespace, vints]),
     )
 
-    # Backup: a CronJob that snapshots + tars the world and writes it to an NFS share
+    # The backup job stops the server for the duration of the tar (containers/backup/
+    # nightly.sh), so it may scale this one Deployment and watch its pods - nothing more.
+    vints_backup_sa = k8s.core.v1.ServiceAccount(
+        "vints-backup",
+        metadata=ObjectMetaArgs(name="vints-backup", namespace=NAMESPACE),
+        opts=pulumi.ResourceOptions(depends_on=[namespace]),
+    )
+
+    vints_backup_role = k8s_rbac.v1.Role(
+        "vints-backup",
+        metadata=ObjectMetaArgs(name="vints-backup", namespace=NAMESPACE),
+        rules=[
+            k8s_rbac.v1.PolicyRuleArgs(
+                api_groups=["apps"],
+                resources=["deployments", "deployments/scale"],
+                verbs=["get", "patch", "update"],
+            ),
+            k8s_rbac.v1.PolicyRuleArgs(
+                api_groups=[""],
+                resources=["pods"],
+                verbs=["get", "list", "watch"],
+            ),
+        ],
+        opts=pulumi.ResourceOptions(depends_on=[namespace]),
+    )
+
+    vints_backup_binding = k8s_rbac.v1.RoleBinding(
+        "vints-backup",
+        metadata=ObjectMetaArgs(name="vints-backup", namespace=NAMESPACE),
+        role_ref=k8s_rbac.v1.RoleRefArgs(
+            api_group="rbac.authorization.k8s.io", kind="Role", name="vints-backup"),
+        subjects=[
+            k8s_rbac.v1.SubjectArgs(
+                kind="ServiceAccount", name="vints-backup", namespace=NAMESPACE),
+        ],
+        opts=pulumi.ResourceOptions(depends_on=[vints_backup_sa, vints_backup_role]),
+    )
+
+    # Nightly maintenance: the CronJob stops the Deployment, tars the quiesced world +
+    # config to the NFS share, then starts the Deployment again (the daily reboot).
+    # 00:00 America/New_York via the CronJob's timeZone field, so DST is the cluster's job.
     vints_backup = k8s.batch.v1.CronJob(
         "vints-backup",
         metadata=ObjectMetaArgs(name="vints-backup", namespace=NAMESPACE),
         spec=k8s.batch.v1.CronJobSpecArgs(
-            schedule="0 3 * * *",           # daily 03:00 (cluster TZ — verify)
+            schedule="0 0 * * *",
+            time_zone="America/New_York",
             concurrency_policy="Forbid",
             job_template=k8s.batch.v1.JobTemplateSpecArgs(
                 spec=k8s.batch.v1.JobSpecArgs(
-                    backoff_limit=2,
+                    # One attempt: a retry would stop the server a second time for nothing.
+                    backoff_limit=0,
                     active_deadline_seconds=3600,
+                    # The finished Job removes itself a day later; its log is the record.
+                    ttl_seconds_after_finished=86400,
                     template=k8s.core.v1.PodTemplateSpecArgs(
                         metadata=ObjectMetaArgs(labels={"app": "vints-backup"}),
                         spec=k8s.core.v1.PodSpecArgs(
-                            restart_policy="OnFailure",
+                            restart_policy="Never",
+                            service_account_name="vints-backup",
                             affinity=_vints_backup_placement(),
                             security_context=k8s.core.v1.PodSecurityContextArgs(
                                 fs_group=1001, run_as_user=1001),
@@ -346,9 +393,17 @@ def register(namespace):
                                     name="vints-backup",
                                     image=VINTS_BACKUP_IMAGE,
                                     image_pull_policy="Always",
+                                    # The image's entrypoint is the tar itself; the nightly
+                                    # job wraps it in stop/start (containers/backup/nightly.sh).
+                                    command=["/bin/sh", "/nightly.sh"],
                                     env=[
                                         {"name": "DATA_PATH", "value": "/data"},
                                         {"name": "BACKUP_DEST", "value": "/backups"},
+                                        {"name": "NAMESPACE", "value": NAMESPACE},
+                                        {"name": "DEPLOYMENT", "value": "vints"},
+                                        # kubectl wants no home dir here, and the rootfs is
+                                        # read-only: point it at the tmp emptyDir.
+                                        {"name": "HOME", "value": "/tmp"},
                                     ],
                                     resources=k8s.core.v1.ResourceRequirementsArgs(
                                         requests={"cpu": "200m", "memory": "128Mi"},
