@@ -1,7 +1,8 @@
 """Vintage Story dedicated server deployed on the k3s cluster
 
-- Self-built slim server image (`.NET 10` runtime + the install/update scripts);
-  the binary + mods are installed/updated by an init container every pod start.
+- Self-built image (`.NET 10` runtime + the pinned game baked in by CI)
+  an init container only syncs mods every pod start, and the game
+  version is whatever the image tag says.
 - World/config/mods persisted on the StorageClass
 - Backup = a CronJob that hard-link snapshots `Saves/`, tars it and writes it to
   an NFS share outside the cluster.
@@ -50,15 +51,15 @@ def _vints_dockerconfigjson(user, token):
 _vints_dockerconfig = pulumi.Output.all(_vints_registry_user, _vints_registry_token).apply(
     lambda ut: _vints_dockerconfigjson(ut[0], ut[1]))
 
-VS_VERSION = _versions["vintagestory_version"]
 VINTS_PREFERRED_NODES = ["node1", "node2"]
 VINTS_PORT = 42420
 VINTS_LB_IP = "10.10.1.91"  # kube-vip LoadBalancer VIP (static)
 VINTS_NFS_SERVER = "10.10.1.101"  # host serving the backup export
 VINTS_NFS_PATH = "/pvebackup"     # export; writable by uid 1001
 
-# ConfigMap: pinned version env + the mods list (direct .zip URLs, one per line;
-# prefix with '#' to comment). Update = edit + push; pod restart re-syncs both.
+# ConfigMap: the mods list (direct .zip URLs, one per line; prefix with '#' to comment).
+# Update = edit + push; a pod restart re-syncs it. The game version is not here - it is baked
+# into the image tag.
 _vints_mods = """\
 # Format: one line per mod, "<mod-id> <direct .zip URL>". The <mod-id> is the
 # install key -> $DATA_PATH/Mods/<id>.zip (deliberately NOT the URL basename,
@@ -69,9 +70,8 @@ _vints_mods = """\
 
 
 def _vints_env():
-    # Shared env for both the init installer and the main server container.
+    # Shared env for both the init (mods) container and the main server container.
     return [
-        {"name": "VS_VERSION", "value": VS_VERSION},
         {"name": "DATA_PATH", "value": "/data"},
         {"name": "PORT", "value": str(VINTS_PORT)},
     ]
@@ -135,7 +135,6 @@ def register(namespace):
         "vints-config",
         metadata=ObjectMetaArgs(name="vints-config", namespace=NAMESPACE),
         data={
-            "VS_VERSION": VS_VERSION,
             "PORT": str(VINTS_PORT),
             "mods.txt": _vints_mods,
         },
@@ -156,7 +155,7 @@ def register(namespace):
         opts=pulumi.ResourceOptions(depends_on=[namespace]),
     )
 
-    # the init container installs + updates server and mods every pod start
+    # the init container only syncs mods every pod start (the game is baked into the image)
     # the main container then runs the server as PID 1.
     vints = k8s.apps.v1.Deployment(
         "vints",
@@ -199,13 +198,9 @@ def register(namespace):
                             ),
                             volume_mounts=[
                                 k8s.core.v1.VolumeMountArgs(
-                                    name="serverfiles", mount_path="/serverfiles"),
-                                k8s.core.v1.VolumeMountArgs(
                                     name="vints-data", mount_path="/data"),
                                 k8s.core.v1.VolumeMountArgs(
                                     name="vints-config", mount_path="/config"),
-                                k8s.core.v1.VolumeMountArgs(
-                                    name="tmp", mount_path="/tmp"),
                             ],
                         ),
                     ],
@@ -255,16 +250,11 @@ def register(namespace):
                             ),
                             volume_mounts=[
                                 k8s.core.v1.VolumeMountArgs(
-                                    name="serverfiles", mount_path="/serverfiles"),
-                                k8s.core.v1.VolumeMountArgs(
                                     name="vints-data", mount_path="/data"),
                             ],
                         ),
                     ],
                     volumes=[
-                        k8s.core.v1.VolumeArgs(
-                            name="serverfiles",
-                            empty_dir=k8s.core.v1.EmptyDirVolumeSourceArgs()),
                         k8s.core.v1.VolumeArgs(
                             name="vints-data",
                             persistent_volume_claim=k8s.core.v1.
@@ -275,9 +265,6 @@ def register(namespace):
                             name="vints-config",
                             config_map=k8s.core.v1.ConfigMapVolumeSourceArgs(
                                 name="vints-config")),
-                        k8s.core.v1.VolumeArgs(
-                            name="tmp",
-                            empty_dir=k8s.core.v1.EmptyDirVolumeSourceArgs()),
                     ],
                 ),
             ),
