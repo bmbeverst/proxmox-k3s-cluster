@@ -20,7 +20,7 @@ dependencies:
     version: v1.21.2
   - name: victoria-metrics-single
     repository: https://victoriametrics.github.io/helm-charts/
-    version: 0.46.0
+    version: 0.47.0
   - name: kube-state-metrics
     repository: https://prometheus-community.github.io/helm-charts
     version: 8.5.0
