@@ -1,6 +1,6 @@
 # Vintage Story server runtime image.
 
-ARG DOTNET_TAG=10.0.11
+ARG DOTNET_TAG=10.0.12
 FROM mcr.microsoft.com/dotnet/runtime:${DOTNET_TAG}
 
 # .NET 10 runtime is the documented system dependency (dotnet-runtime-10.0).
