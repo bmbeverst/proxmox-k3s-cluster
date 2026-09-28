@@ -9,30 +9,45 @@ build:vints:
   script:
     - |
       set -euo pipefail
-      # skopeo handles registry auth and pagination; the buildah image doesn't ship it.
-      dnf -y -q install skopeo jq
+      # skopeo handles registry auth and pagination
+      dnf -y -q install skopeo jq curl
       REPO="$CI_REGISTRY_IMAGE/vints-server"
-      # The deployed tag's major.minor is the version track. versions.yaml is repo content, so
-      # validate its shape before the value is used. Moving the track also needs a change under
-      # pulumi/my-apps/containers/server/, because versions.yaml no longer triggers a build.
       TAG=$(grep '^vints_server_image_tag:' pulumi/versions.yaml | awk '{print $2}')
       printf '%s' "$TAG" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' \
         || { echo "FATAL: vints_server_image_tag in pulumi/versions.yaml is not X.Y.Z"; exit 1; }
       MAJOR="${TAG%%.*}"; REST="${TAG#*.}"; MINOR="${REST%%.*}"
-      # skopeo follows the registry's Link pagination, so this is every tag in the repo.
       TAGS=$(skopeo list-tags --retry-times 3 \
         --creds "$CI_REGISTRY_USER:$CI_REGISTRY_PASSWORD" "docker://$REPO" | jq -r '.Tags[]') \
         || { echo "FATAL: could not read vints-server tags from the registry"; exit 1; }
       MAX_PATCH=$(printf '%s\n' "$TAGS" | grep -E "^${MAJOR}\.${MINOR}\.[0-9]+$" \
         | sed 's/^.*\.//' | sort -n | tail -1)
       FULL_TAG="${MAJOR}.${MINOR}.$(( ${MAX_PATCH:-0} + 1 ))"
-      echo "Building $REPO:$FULL_TAG (track ${MAJOR}.${MINOR})"
+      VS_VERSION=$(sed -n 's/^vintagestory_version:[[:space:]]*//p' \
+        pulumi/my-apps/containers/server/vintagestory-version.yaml)
+      printf '%s' "$VS_VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' \
+        || { echo "FATAL: vintagestory_version in containers/server/vintagestory-version.yaml is not X.Y.Z"; exit 1; }
+      VS_INDEX="https://api.vintagestory.at/stable-unstable.json"
+      VS_JSON=$(curl -fsSL --retry 3 "$VS_INDEX") \
+        || { echo "FATAL: could not fetch $VS_INDEX"; exit 1; }
+      VS_URL=$(printf '%s' "$VS_JSON" | jq -r --arg v "$VS_VERSION" '.[$v].linuxserver.urls.cdn? // empty')
+      VS_MD5=$(printf '%s' "$VS_JSON" | jq -r --arg v "$VS_VERSION" '.[$v].linuxserver.md5? // empty')
+      case "$VS_URL" in
+        https://*) ;;
+        *) echo "FATAL: VS $VS_VERSION has no https CDN url in the index (got '$VS_URL')"; exit 1 ;;
+      esac
+      printf '%s' "$VS_MD5" | grep -Eq '^[0-9a-f]{32}$' \
+        || { echo "FATAL: VS $VS_VERSION has no md5 in the index (got '$VS_MD5')"; exit 1; }
+
+      echo "Building $REPO:$FULL_TAG (track ${MAJOR}.${MINOR}) baking Vintage Story $VS_VERSION"
+      echo "  artifact $VS_URL (md5 $VS_MD5)"
       buildah build --storage-driver=vfs --isolation=chroot \
+        --build-arg "VS_VERSION=$VS_VERSION" \
+        --build-arg "VS_URL=$VS_URL" \
+        --build-arg "VS_MD5=$VS_MD5" \
         --tag "$REPO:$FULL_TAG" \
         --tag "$REPO:latest" \
         pulumi/my-apps/containers/server
-      # A published tag is never re-pushed: pods pull with imagePullPolicy: Always, so a re-push
-      # silently changes what runs with no versions.yaml change. Re-read now that the build is done.
+      # A published tag is never re-pushed
       LATEST_TAGS=$(skopeo list-tags --retry-times 3 \
         --creds "$CI_REGISTRY_USER:$CI_REGISTRY_PASSWORD" "docker://$REPO" | jq -r '.Tags[]') \
         || { echo "FATAL: could not re-read vints-server tags before pushing"; exit 1; }
@@ -48,8 +63,6 @@ build:vints:
         "$REPO:latest" \
         "docker://$REPO:latest"
   rules:
-    # versions.yaml is Renovate's output (the deploy pin), so it is not a build trigger: a pin
-    # bump would rebuild -> publish a new tag -> Renovate bump -> rebuild, forever.
     - if: $CI_PIPELINE_SOURCE == "push"
       changes:
         - pulumi/my-apps/containers/server/**
@@ -59,7 +72,6 @@ build:vints:
 build:vints-backup:
   stage: build
   image: quay.io/containers/buildah:v1.43.2-immutable
-  # "max patch + 1" is read-then-write: serialise so two pipelines can't compute the same tag.
   resource_group: build-vints-backup
   script:
     - |
@@ -67,27 +79,22 @@ build:vints-backup:
       # skopeo handles registry auth and pagination; the buildah image doesn't ship it.
       dnf -y -q install skopeo jq
       REPO="$CI_REGISTRY_IMAGE/vints-backup"
-      # The deployed tag's major.minor is the version track. versions.yaml is repo content, so
-      # validate its shape before the value is used. Moving the track also needs a change under
-      # pulumi/my-apps/containers/backup/, because versions.yaml no longer triggers a build.
       TAG=$(grep '^vints_backup_image_tag:' pulumi/versions.yaml | awk '{print $2}')
       printf '%s' "$TAG" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' \
         || { echo "FATAL: vints_backup_image_tag in pulumi/versions.yaml is not X.Y.Z"; exit 1; }
       MAJOR="${TAG%%.*}"; REST="${TAG#*.}"; MINOR="${REST%%.*}"
-      # skopeo follows the registry's Link pagination, so this is every tag in the repo.
       TAGS=$(skopeo list-tags --retry-times 3 \
         --creds "$CI_REGISTRY_USER:$CI_REGISTRY_PASSWORD" "docker://$REPO" | jq -r '.Tags[]') \
         || { echo "FATAL: could not read vints-backup tags from the registry"; exit 1; }
       MAX_PATCH=$(printf '%s\n' "$TAGS" | grep -E "^${MAJOR}\.${MINOR}\.[0-9]+$" \
         | sed 's/^.*\.//' | sort -n | tail -1)
       FULL_TAG="${MAJOR}.${MINOR}.$(( ${MAX_PATCH:-0} + 1 ))"
+
       echo "Building $REPO:$FULL_TAG (track ${MAJOR}.${MINOR})"
       buildah build --storage-driver=vfs --isolation=chroot \
         --tag "$REPO:$FULL_TAG" \
         --tag "$REPO:latest" \
         pulumi/my-apps/containers/backup
-      # A published tag is never re-pushed: pods pull with imagePullPolicy: Always, so a re-push
-      # silently changes what runs with no versions.yaml change. Re-read now that the build is done.
       LATEST_TAGS=$(skopeo list-tags --retry-times 3 \
         --creds "$CI_REGISTRY_USER:$CI_REGISTRY_PASSWORD" "docker://$REPO" | jq -r '.Tags[]') \
         || { echo "FATAL: could not re-read vints-backup tags before pushing"; exit 1; }
@@ -103,8 +110,6 @@ build:vints-backup:
         "$REPO:latest" \
         "docker://$REPO:latest"
   rules:
-    # versions.yaml is Renovate's output (the deploy pin), so it is not a build trigger: a pin
-    # bump would rebuild -> publish a new tag -> Renovate bump -> rebuild, forever.
     - if: $CI_PIPELINE_SOURCE == "push"
       changes:
         - pulumi/my-apps/containers/backup/**
@@ -151,9 +156,6 @@ smoke:vints:
     - if: $CI_PIPELINE_SOURCE == "push"
       changes:
         - pulumi/my-apps/containers/server/**
-        # A Vintage Story version bump rolls the pods on merge (VS_VERSION is a pod-template env),
-        # so it has to be smoke-tested even though the image itself hasn't changed.
-        - pulumi/versions.yaml
         - .gitlab/ci/containers.yml
     - when: never
   script:
@@ -162,36 +164,45 @@ smoke:vints:
     - |
       set -e
       die() { echo "smoke FAILED: $1"; podman logs smoke-vints 2>/dev/null || true; podman rm -f smoke-vints >/dev/null 2>&1 || true; exit 1; }
-       TAG="latest"
-      # The image intentionally does NOT bake the server in; the init container runs
-      # install-vints.sh to download it. Replicate that. Needs egress to
-      # api/cdn.vintagestory.at from the runner.
-      VS_VERSION=$(grep '^vintagestory_version:' pulumi/versions.yaml | awk '{print $2}')
+      TAG="latest"
+      VS_VERSION=$(sed -n 's/^vintagestory_version:[[:space:]]*//p' \
+        pulumi/my-apps/containers/server/vintagestory-version.yaml)
       D=$(mktemp -d)
-      mkdir -p "$D/srv" "$D/data" "$D/config" "$D/tmp"
+      mkdir -p "$D/data" "$D/config" "$D/tmp"
       : > "$D/config/mods.txt"
       echo "VS_VERSION=$VS_VERSION TAG=$TAG"
-      # 1) install server files (output captured so failures are diagnosable)
+
+      # 1) the tag promises this game version: assert the baked binaries agree
+      baked=$(podman run --rm "$CI_REGISTRY_IMAGE/vints-server:$TAG" \
+        /serverfiles/VintagestoryServer --version 2>/dev/null | tr -d '[:space:]' || true)
+      case "$baked" in
+        *"$VS_VERSION"*) echo "baked game version OK: $baked" ;;
+        *) die "image reports game version '$baked', pinned '$VS_VERSION'" ;;
+      esac
+
+      # 2) the init container only syncs mods now; an empty mods.txt must exit cleanly
       podman run --rm -u 0 \
-        -e VS_VERSION="$VS_VERSION" -e DATA_PATH=/data -e PORT=42420 \
-        -v "$D/srv":/serverfiles -v "$D/data":/data -v "$D/config":/config -v "$D/tmp":/tmp \
+        -e DATA_PATH=/data -e PORT=42420 \
+        -v "$D/data":/data -v "$D/config":/config -v "$D/tmp":/tmp \
         "$CI_REGISTRY_IMAGE/vints-server:$TAG" /entrypoints/install-vints.sh \
-        > "$D/install.log" 2>&1 \
-        || { echo "--- install step failed (rc=$?) ---"; tail -60 "$D/install.log"; die "install step failed"; }
-      grep -q "server ready" "$D/install.log" \
-        || { echo "--- install output, no 'server ready' ---"; tail -60 "$D/install.log"; die "install produced no 'server ready'"; }
-      echo "install OK"
-      # 2) generate config, then shrink the world so first boot reaches WorldReady fast
+        > "$D/mods.log" 2>&1 \
+        || { echo "--- mods step failed ---"; tail -60 "$D/mods.log"; die "mods init step failed"; }
+      grep -q '\[mods\] done' "$D/mods.log" \
+        || { echo "--- mods output, no '[mods] done' ---"; tail -60 "$D/mods.log"; die "mods step produced no '[mods] done'"; }
+      echo "mods init OK"
+
+      # 3) generate config, then shrink the world so first boot reaches WorldReady fast
       podman run --rm -u 0 -e DATA_PATH=/data -e PORT=42420 \
-        -v "$D/srv":/serverfiles -v "$D/data":/data \
+        -v "$D/data":/data \
         "$CI_REGISTRY_IMAGE/vints-server:$TAG" \
         /bin/sh -c 'cd /serverfiles && ./VintagestoryServer --dataPath /data --genconfig >/dev/null 2>&1' \
         || die "genconfig step failed"
       sed -i 's/"MapSizeX": [0-9][0-9]*/"MapSizeX": 512/; s/"MapSizeY": [0-9][0-9]*/"MapSizeY": 128/; s/"MapSizeZ": [0-9][0-9]*/"MapSizeZ": 512/' "$D/data/serverconfig.json"
-      # 3) boot and assert: stays up, reaches WorldReady, and does NOT NRE
+
+      # 4) boot and assert: stays up, reaches WorldReady, and does NOT NRE
       podman run -d --name smoke-vints -u 0 \
         -e DATA_PATH=/data -e PORT=42420 \
-        -v "$D/srv":/serverfiles -v "$D/data":/data \
+        -v "$D/data":/data \
         "$CI_REGISTRY_IMAGE/vints-server:$TAG" /entrypoints/start-vints.sh \
         || die "could not start server container"
       ok=""
@@ -223,9 +234,16 @@ smoke:vints-backup:
       TAG="latest"
       set -e
       D=$(mktemp -d)
-      mkdir -p "$D/data/Saves" "$D/dest" "$D/tmp"
+      mkdir -p "$D/data/Saves" "$D/data/Playerdata" "$D/dest" "$D/tmp"
       printf 'world' > "$D/data/Saves/seed.vcdbs"
       printf '{}' > "$D/data/serverconfig.json"
+
+      # Whitelist/bans/player data live beside the world, not inside it.
+      printf '["player"]' > "$D/data/Playerdata/playerswhitelisted.json"
+      # Per-mod settings live beside the world too.
+      mkdir -p "$D/data/ModConfig"
+      printf '{}' > "$D/data/ModConfig/primitivesurvival.json"
+
       # A run killed mid-tar leaves its .part behind; the prune glob never matches it.
       printf 'stale' > "$D/dest/saves-20000101T000000Z.tar.gz.part"
       podman run --rm -u 0 \
@@ -235,12 +253,18 @@ smoke:vints-backup:
         || { echo "backup smoke FAILED: non-zero exit"; exit 1; }
       ls "$D/dest"/saves-*.tar.gz >/dev/null 2>&1 \
         || { echo "backup smoke FAILED: no tar produced"; exit 1; }
+
       # Members mirror DATA_PATH: world under Saves/, serverconfig.json beside it.
       tar -tzf "$D/dest"/saves-*.tar.gz > "$D/members.txt"
       grep -qx 'Saves/seed.vcdbs' "$D/members.txt" \
         || { echo "backup smoke FAILED: world missing from tar"; cat "$D/members.txt"; exit 1; }
       grep -qx 'serverconfig.json' "$D/members.txt" \
         || { echo "backup smoke FAILED: serverconfig.json missing from tar"; cat "$D/members.txt"; exit 1; }
+      # A restore without the whitelist/bans locks players out (or lets them back in).
+      grep -qx 'Playerdata/playerswhitelisted.json' "$D/members.txt" \
+        || { echo "backup smoke FAILED: Playerdata missing from tar"; cat "$D/members.txt"; exit 1; }
+      grep -qx 'ModConfig/primitivesurvival.json' "$D/members.txt" \
+        || { echo "backup smoke FAILED: ModConfig missing from tar"; cat "$D/members.txt"; exit 1; }
       # Stale .part files from a killed run must be swept, not left to accumulate.
       [ ! -f "$D/dest/saves-20000101T000000Z.tar.gz.part" ] \
         || { echo "backup smoke FAILED: stale .part not cleaned up"; ls -la "$D/dest"; exit 1; }
