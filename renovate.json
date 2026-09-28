@@ -4,18 +4,19 @@
     "config:recommended"
   ],
   "minimumReleaseAge": "7 days",
+  "minimumReleaseAgeBehaviour": "timestamp-optional",
   "automerge": true,
   "platformAutomerge": true,
   "packageRules": [
     {
-      "description": "Major bumps require manual review (never automerge); patch & minor automerge via the global automerge default",
+      "description": "Majors never automerge; patch and minor do",
       "matchUpdateTypes": [
         "major"
       ],
       "automerge": false
     },
     {
-      "description": "Ghost Docker image: stay on Alpine variants (versioningTemplate semver-coerced drops the -alpine suffix)",
+      "description": "Ghost image: keep the -alpine suffix",
       "matchDatasources": [
         "docker"
       ],
@@ -26,7 +27,7 @@
       "allowedVersions": "/^\\d+\\.\\d+\\.\\d+-alpine$/"
     },
     {
-      "description": "Piraeus operator chart (infra-apps): OCI registry exposes no release timestamp, so use GitHub releases to satisfy minimumReleaseAge/automerge",
+      "description": "Piraeus chart: GitHub releases carry the timestamps the OCI registry lacks",
       "matchManagers": [
         "helmv3"
       ],
@@ -45,7 +46,7 @@
       "versioning": "helm"
     },
     {
-      "description": "linstor-cluster chart (infra-apps): OCI registry exposes no release timestamp, so use GitHub releases to satisfy minimumReleaseAge/automerge",
+      "description": "linstor-cluster chart: GitHub releases carry the timestamps the OCI registry lacks",
       "matchManagers": [
         "helmv3"
       ],
@@ -64,7 +65,7 @@
       "versioning": "helm"
     },
     {
-      "description": "Vints Docker images from private GitLab registry: no minimumReleaseAge (tag age = creation time). [skip ci] keeps a pin bump from retriggering CI/builds",
+      "description": "Vints images: [skip ci] so a pin bump does not retrigger CI",
       "matchDatasources": [
         "docker"
       ],
@@ -75,11 +76,20 @@
       "matchFileNames": [
         "pulumi/versions.yaml"
       ],
-      "minimumReleaseAge": null,
       "commitMessageSuffix": "[skip ci]"
     },
     {
-      "description": "Pulumi Kubernetes operator chart (infra-bootstrap): use timestamped GitHub chart releases for Pulumi Operator. Never automerge: review the MR, then run `pulumi up` in pulumi/infra-bootstrap/ (a PKO self-upgrade replaces the controller that is running the upgrade)",
+      "description": "pyproject floors: bump the >= lower bounds",
+      "matchManagers": [
+        "pep621"
+      ],
+      "matchDatasources": [
+        "pypi"
+      ],
+      "rangeStrategy": "bump"
+    },
+    {
+      "description": "PKO chart: GitHub releases carry the timestamps; never automerge (review, then `pulumi up`)",
       "matchManagers": [
         "helmv3"
       ],
