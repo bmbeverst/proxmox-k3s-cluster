@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Daily CronJob: snapshot the world + the config beside it (Saves/, serverconfig.json,
-# Playerdata/, ModConfig/), tar it, and write it to an NFS share (atomic rename on
-# the share). Retains the 7 newest backups.
+# Playerdata/, ModConfig/), tar it, and write it to an NFS share (atomic rename on the
+# share). Retains the 7 newest backups.
+# Runs with the server stopped (nightly.sh scales it down first), so the archive is a
+# point-in-time copy instead of a world that keeps moving under it.
 # Members mirror $DATA_PATH, so a restore is one command: tar -xzf saves-<ts>.tar.gz -C /data
 # Runs under /bin/sh (busybox ash in the image): no bash arrays/bashisms.
 set -euo pipefail
@@ -20,10 +22,12 @@ if [[ ! -d "$DATA_PATH/Saves" ]]; then
   exit 0
 fi
 
-# Hard-link snapshot of the world (cheap: same filesystem as Saves).
+# Copy the world into the staging dir on the same filesystem and tar that: a real copy is
+# frozen at this instant, so nothing that starts writing later (a server that comes back
+# early, a stray writer) can tear the archive. Hard links would follow the live file.
 rm -rf "$SNAP"
 mkdir -p "$SNAP/Saves"
-cp -al "$DATA_PATH/Saves/." "$SNAP/Saves/"
+cp -a "$DATA_PATH/Saves/." "$SNAP/Saves/"
 
 # serverconfig.json pins "SaveFileLocation" (an absolute path) + the world settings.
 members="Saves"
