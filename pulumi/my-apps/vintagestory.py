@@ -31,6 +31,9 @@ VINTS_REGISTRY = "registry.gitlab.com"
 VINTS_REGISTRY_IMAGE_ROOT = f"{VINTS_REGISTRY}/proxmox-k3s/proxmox-k3s-cluster"
 VINTS_IMAGE = f"{VINTS_REGISTRY_IMAGE_ROOT}/vints-server:{_versions['vints_server_image_tag']}"
 VINTS_BACKUP_IMAGE = f"{VINTS_REGISTRY_IMAGE_ROOT}/vints-backup:{_versions['vints_backup_image_tag']}"
+# The CI-baked mod depot (`bake:vints-mods`); the seed init container copies /bundle from it. No
+# versions.yaml entry on purpose: the tag is fixed, the content moves with the pins.
+VINTS_MODS_IMAGE = f"{VINTS_REGISTRY_IMAGE_ROOT}/vints-mods:latest"
 
 _vints_cfg = pulumi.Config("my-apps")
 _vints_registry_user = _vints_cfg.require_secret("vintsRegistryReadUser")
@@ -187,11 +190,35 @@ def register(namespace):
                         k8s.core.v1.LocalObjectReferenceArgs(name="vints-regcred"),
                     ],
                     init_containers=[
+                        # Seeds /data/.vints-mods/seed from the CI-baked bundle, so the resolver
+                        # installs the pinned set from the depot without fetching from the Mod DB.
+                        # Strict on purpose: a bundle that cannot be staged must fail the pod loudly.
+                        k8s.core.v1.ContainerArgs(
+                            name="vints-mods-seed",
+                            image=VINTS_MODS_IMAGE,
+                            image_pull_policy="Always",
+                            command=["sh", "-c",
+                                     "mkdir -p /data/.vints-mods/seed"
+                                     " && cp -R /bundle/. /data/.vints-mods/seed/"],
+                            security_context=k8s.core.v1.SecurityContextArgs(
+                                run_as_non_root=True,
+                                allow_privilege_escalation=False,
+                                read_only_root_filesystem=True,
+                                capabilities=k8s.core.v1.CapabilitiesArgs(
+                                    drop=["ALL"]),
+                            ),
+                            volume_mounts=[
+                                k8s.core.v1.VolumeMountArgs(
+                                    name="vints-data", mount_path="/data"),
+                            ],
+                        ),
                         k8s.core.v1.ContainerArgs(
                             name="vints-installer",
                             image=VINTS_IMAGE,
                             image_pull_policy="Always",
-                            command=["/entrypoints/resolve-vints-mods.sh", "--stage", "--mods", "/config/mods.yaml"],
+                            command=["/entrypoints/resolve-vints-mods.sh", "--stage",
+                                     "--mods", "/config/mods.yaml",
+                                     "--seed", "/data/.vints-mods/seed"],
                             env=_vints_env(),
                             security_context=k8s.core.v1.SecurityContextArgs(
                                 run_as_non_root=True,
