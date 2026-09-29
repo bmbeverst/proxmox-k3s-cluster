@@ -1,0 +1,10 @@
+# Mods this server runs. One entry per line: "<key>: <version|url>".
+#   key    the mod's internal Mod ID -> $DATA_PATH/Mods/<key>.zip (the game keys on the modid, not
+#          on the filename)
+#   value  a released mod version (Renovate tracks it) or a full https .zip URL (used verbatim)
+# The datasource for tracked entries lives in renovate.json (one per game minor), so adding a mod is
+# one line here and nothing else.
+
+hudclockpatch: 4.4.1
+egocaribautomapmarkers: 5.0.3
+sortablestorage: 3.0.0

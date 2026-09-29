@@ -5,7 +5,7 @@ FROM mcr.microsoft.com/dotnet/runtime:${DOTNET_TAG}
 
 # .NET 10 runtime is the documented system dependency (dotnet-runtime-10.0).
 RUN apt-get update \
- && apt-get install -y --no-install-recommends curl ca-certificates tar jq \
+ && apt-get install -y --no-install-recommends curl ca-certificates tar jq unzip \
  && rm -rf /var/lib/apt/lists/*
 
 # Non-root runtime identity
@@ -40,4 +40,7 @@ LABEL org.opencontainers.image.version="${VS_VERSION}" \
 USER 1001
 WORKDIR /serverfiles
 ENV PORT=42420 DATA_PATH=/data
+# The resolver reads the game minor from this; the ConfigMap must not be the source (between a
+# VS pin bump and the new tag being deployed the CM would describe a game the pod is not running).
+ENV VS_VERSION=${VS_VERSION}
 # No ENTRYPOINT on purpose
