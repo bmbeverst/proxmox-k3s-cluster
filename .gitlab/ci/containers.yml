@@ -1,6 +1,42 @@
 # Container build + scan jobs for the custom container images.
 # Included from the root .gitlab-ci.yml (`- local: .gitlab/ci/containers.yml`).
 
+# Mod pins: resolve every pin against the Mod DB (bytes, modid, version, game dependency) and check
+# that renovate.json tracks the game minor the image bakes. Runs the resolver straight out of the
+# repo, so a pin or resolver change needs no image tag hop.
+check:vints-mods:
+  stage: test
+  image: quay.io/containers/podman:v5.8.7-immutable
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "push"
+      changes:
+        - pulumi/my-apps/containers/server/vintagestory-mods.yaml
+        - pulumi/my-apps/containers/server/vintagestory-version.yaml
+        - pulumi/my-apps/containers/server/entrypoints/**
+        - renovate.json
+        - .gitlab/ci/containers.yml
+    - when: never
+  script:
+    # curl and unzip already ship in this image; only jq is missing.
+    - dnf -y -q install jq
+    - |
+      set -euo pipefail
+      VS_VERSION=$(sed -n 's/^vintagestory_version:[[:space:]]*//p' \
+        pulumi/my-apps/containers/server/vintagestory-version.yaml)
+      export VS_VERSION
+      MINOR="${VS_VERSION%.*}"                   # 1.22.7 -> 1.22
+      DS_NAME="vintagestory_mod_${MINOR//./_}"   # -> vintagestory_mod_1_22
+      # Drift guard: the mods manager must point at this game minor's datasource, otherwise Renovate
+      # would quietly track a game version the image does not run. A VS bump fails here until
+      # renovate.json follows (two lines: the manager's datasourceTemplate + a customDatasources key).
+      jq -e --arg ds "custom.$DS_NAME" --arg key "$DS_NAME" '
+        ([.customManagers[] | select(.description | test("vints mods"))] | length == 1)
+        and ([.customManagers[] | select(.description | test("vints mods"))][0].datasourceTemplate == $ds)
+        and (.customDatasources | has($key))
+      ' renovate.json > /dev/null
+      pulumi/my-apps/containers/server/entrypoints/resolve-vints-mods.sh \
+        --check --mods pulumi/my-apps/containers/server/vintagestory-mods.yaml
+
 build:vints:
   stage: build
   image: quay.io/containers/buildah:v1.43.4-immutable
@@ -65,7 +101,12 @@ build:vints:
   rules:
     - if: $CI_PIPELINE_SOURCE == "push"
       changes:
-        - pulumi/my-apps/containers/server/**
+        # Deliberately narrow: the mod pins also live under containers/server/, and a pins-only
+        # commit must not rebuild + republish the game image. Add any future build-context file
+        # that the image needs to this list.
+        - pulumi/my-apps/containers/server/Dockerfile
+        - pulumi/my-apps/containers/server/entrypoints/**
+        - pulumi/my-apps/containers/server/vintagestory-version.yaml
         - .gitlab/ci/containers.yml
     - when: never
 
@@ -165,55 +206,111 @@ smoke:vints:
       set -e
       die() { echo "smoke FAILED: $1"; podman logs smoke-vints 2>/dev/null || true; podman rm -f smoke-vints >/dev/null 2>&1 || true; exit 1; }
       TAG="latest"
+      IMG="$CI_REGISTRY_IMAGE/vints-server:$TAG"
+      PINS=pulumi/my-apps/containers/server/vintagestory-mods.yaml
       VS_VERSION=$(sed -n 's/^vintagestory_version:[[:space:]]*//p' \
         pulumi/my-apps/containers/server/vintagestory-version.yaml)
       D=$(mktemp -d)
-      mkdir -p "$D/data" "$D/config" "$D/tmp"
-      : > "$D/config/mods.txt"
-      echo "VS_VERSION=$VS_VERSION TAG=$TAG"
+      mkdir -p "$D/data/Mods" "$D/config" "$D/empty"
+      cp "$PINS" "$D/config/mods.yaml"
+      PINS_COUNT=$(grep -c '^[^#[:space:]]' "$D/config/mods.yaml" || true)
+      echo "VS_VERSION=$VS_VERSION TAG=$TAG PINS=$PINS_COUNT"
 
       # 1) the tag promises this game version: assert the baked binaries agree
-      baked=$(podman run --rm "$CI_REGISTRY_IMAGE/vints-server:$TAG" \
+      baked=$(podman run --rm "$IMG" \
         /serverfiles/VintagestoryServer --version 2>/dev/null | tr -d '[:space:]' || true)
       case "$baked" in
         *"$VS_VERSION"*) echo "baked game version OK: $baked" ;;
         *) die "image reports game version '$baked', pinned '$VS_VERSION'" ;;
       esac
 
-      # 2) the init container only syncs mods now; an empty mods.txt must exit cleanly
-      podman run --rm -u 0 \
-        -e DATA_PATH=/data -e PORT=42420 \
-        -v "$D/data":/data -v "$D/config":/config -v "$D/tmp":/tmp \
-        "$CI_REGISTRY_IMAGE/vints-server:$TAG" /entrypoints/install-vints.sh \
-        > "$D/mods.log" 2>&1 \
-        || { echo "--- mods step failed ---"; tail -60 "$D/mods.log"; die "mods init step failed"; }
-      grep -q '\[mods\] done' "$D/mods.log" \
-        || { echo "--- mods output, no '[mods] done' ---"; tail -60 "$D/mods.log"; die "mods step produced no '[mods] done'"; }
-      echo "mods init OK"
+      # 2) leftovers of the old installer: a stray zip and a legacy .url stamp must be pruned
+      printf 'junk' > "$D/data/Mods/junk.zip"
+      printf 'https://example.invalid/x.zip' > "$D/data/Mods/junk.url"
 
-      # 3) generate config, then shrink the world so first boot reaches WorldReady fast
+      # 3) networked stage: every pin lands in Mods/ and in the depot
+      podman run --rm -u 0 -e DATA_PATH=/data \
+        -v "$D/data":/data -v "$D/config":/config \
+        "$IMG" /entrypoints/resolve-vints-mods.sh --stage --mods /config/mods.yaml \
+        > "$D/stage.log" 2>&1 || { tail -60 "$D/stage.log"; die "staging the pins failed"; }
+      cat "$D/stage.log"
+      [ "$(ls "$D/data/Mods"/*.zip 2>/dev/null | wc -l)" = "$PINS_COUNT" ] \
+        || { ls -la "$D/data/Mods"; die "expected one staged zip per pin ($PINS_COUNT)"; }
+      [ "$(ls "$D/data/.vints-mods/depot"/*.zip 2>/dev/null | wc -l)" = "$PINS_COUNT" ] \
+        || { ls -la "$D/data/.vints-mods/depot"; die "the depot does not hold one archive per pin"; }
+      if ! grep -q 'prune: removed junk.zip (not in the pinned set)' "$D/stage.log"; then
+        die "junk.zip was not pruned"
+      fi
+      if ! grep -q 'prune: removed junk.url (not in the pinned set)' "$D/stage.log"; then
+        die "the legacy .url stamp was not pruned"
+      fi
+      echo "stage OK: $PINS_COUNT pinned mod(s) + depot"
+
+      # 4) hermetic stage: the steady state must need no network at all
+      podman run --rm --network=none -u 0 -e DATA_PATH=/data \
+        -v "$D/data":/data -v "$D/config":/config \
+        "$IMG" /entrypoints/resolve-vints-mods.sh --stage --mods /config/mods.yaml \
+        > "$D/offline.log" 2>&1 || { tail -60 "$D/offline.log"; die "a steady-state stage needed the network"; }
+      if grep -q 'downloading' "$D/offline.log"; then
+        cat "$D/offline.log"
+        die "the offline stage tried to download"
+      fi
+      echo "offline stage OK"
+
+      # 5) a URL pin that 404s is fatal, in a fresh data dir, before the server is ever reached
+      printf 'anymod: https://mods.vintagestory.at/download/1/no-such-mod.zip\n' > "$D/config/bad.yaml"
+      if podman run --rm -u 0 -e DATA_PATH=/data \
+        -v "$D/empty":/data -v "$D/config":/config \
+        "$IMG" /entrypoints/resolve-vints-mods.sh --stage --mods /config/bad.yaml \
+        > "$D/bad.log" 2>&1; then
+        tail -40 "$D/bad.log"
+        die "a 404 URL pin did not fail"
+      fi
+      [ -z "$(ls "$D/empty/Mods"/*.zip 2>/dev/null)" ] || die "a failed stage left zips in Mods/"
+      echo "fail-loud stage OK"
+
+      # 6) generate config, then shrink the world so first boot reaches WorldReady fast
       podman run --rm -u 0 -e DATA_PATH=/data -e PORT=42420 \
         -v "$D/data":/data \
-        "$CI_REGISTRY_IMAGE/vints-server:$TAG" \
-        /bin/sh -c 'cd /serverfiles && ./VintagestoryServer --dataPath /data --genconfig >/dev/null 2>&1' \
+        "$IMG" /bin/sh -c 'cd /serverfiles && ./VintagestoryServer --dataPath /data --genconfig >/dev/null 2>&1' \
         || die "genconfig step failed"
       sed -i 's/"MapSizeX": [0-9][0-9]*/"MapSizeX": 512/; s/"MapSizeY": [0-9][0-9]*/"MapSizeY": 128/; s/"MapSizeZ": [0-9][0-9]*/"MapSizeZ": 512/' "$D/data/serverconfig.json"
 
-      # 4) boot and assert: stays up, reaches WorldReady, and does NOT NRE
+      # 7) boot on the staged set: every pinned mod must load and the world must come up
       podman run -d --name smoke-vints -u 0 \
         -e DATA_PATH=/data -e PORT=42420 \
         -v "$D/data":/data \
-        "$CI_REGISTRY_IMAGE/vints-server:$TAG" /entrypoints/start-vints.sh \
+        "$IMG" /entrypoints/start-vints.sh \
         || die "could not start server container"
       ok=""
-      for i in $(seq 1 5); do
+      for i in $(seq 1 60); do
         podman logs smoke-vints > "$D/boot.log" 2>&1 || true
-        grep -qi 'create new save game data' "$D/boot.log" && { ok=1; break; }
+        grep -q 'Entering runphase WorldReady' "$D/boot.log" && { ok=1; break; }
         [ "$(podman inspect -f '{{.State.Running}}' smoke-vints 2>/dev/null || echo false)" = "true" ] || break
-        sleep 1
+        sleep 2
       done
-      [ -n "$ok" ] || { echo "--- boot output (no 'create new save game data') ---"; tail -80 "$D/boot.log"; die "server did not start creating the world"; }
-      if grep -qi NullReferenceException "$D/boot.log"; then tail -80 "$D/boot.log"; die "NullReferenceException detected"; fi
+      if [ -z "$ok" ]; then
+        echo "--- boot output (no 'Entering runphase WorldReady') ---"
+        tail -80 "$D/boot.log"
+        die "server did not reach WorldReady"
+      fi
+      # every staged zip + the 3 base mods baked into the game
+      if ! grep -q "Found $((PINS_COUNT + 3)) mods (0 disabled)" "$D/boot.log"; then
+        grep -i 'mods' "$D/boot.log" | head -5
+        die "the game did not load $((PINS_COUNT + 3)) mods"
+      fi
+      # a version pin's key is the mod's internal Mod ID, which the game logs in its load order
+      # ("Mods, sorted by dependency: ..."); a URL pin's key is free-form, the count covers it
+      while read -r key; do
+        if ! grep -qE "\b$key\b" "$D/boot.log"; then
+          grep -i 'sorted by dependency' "$D/boot.log" | head -2
+          die "pinned mod '$key' did not load"
+        fi
+      done < <(grep '^[^#[:space:]]' "$D/config/mods.yaml" | grep -v 'https://' | sed 's/^[[:space:]]*//; s/:.*//')
+      if grep -qi NullReferenceException "$D/boot.log"; then
+        tail -80 "$D/boot.log"
+        die "NullReferenceException detected"
+      fi
       grep -q '"ServerAutoSave": 900' "$D/data/servermagicnumbers.json" \
         || { echo "--- servermagicnumbers.json ---"; cat "$D/data/servermagicnumbers.json"; die "ServerAutoSave not raised"; }
       echo "server smoke OK"
@@ -269,3 +366,60 @@ smoke:vints-backup:
       [ ! -f "$D/dest/saves-20000101T000000Z.tar.gz.part" ] \
         || { echo "backup smoke FAILED: stale .part not cleaned up"; ls -la "$D/dest"; exit 1; }
       echo "backup smoke OK"
+
+# Turns a URL pin into a tracked "<internal modid>: <version>" pin, but only when that the tracked
+# pin would resolve to exactly the bytes the URL served (the resolver's --promote). The line then
+# costs one pod restart and zero network, and Renovate owns the updates from its next run.
+promote:vints-mods:
+  stage: maintenance
+  image: quay.io/containers/podman:v5.8.7-immutable
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      changes:
+        - pulumi/my-apps/containers/server/vintagestory-mods.yaml
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+    - when: never
+  script:
+    # curl and unzip already ship in this image; only jq is missing.
+    - dnf -y -q install jq
+    - |
+      set -euo pipefail
+      : "${RENOVATE_TOKEN:?RENOVATE_TOKEN is protected, so this job only runs on protected refs}"
+      PINS=pulumi/my-apps/containers/server/vintagestory-mods.yaml
+      VS_VERSION=$(sed -n 's/^vintagestory_version:[[:space:]]*//p' \
+        pulumi/my-apps/containers/server/vintagestory-version.yaml)
+      export VS_VERSION
+      BRANCH="mods/promote-url-pins-$(date -u +%Y%m%dT%H%M%SZ)"
+
+      out=$(pulumi/my-apps/containers/server/entrypoints/resolve-vints-mods.sh --promote --mods "$PINS")
+      echo "$out"
+      if git diff --quiet; then
+        echo "no URL pin can be tracked byte-for-byte: nothing to do"
+        exit 0
+      fi
+      COUNT=$(grep -c '^\[mods\] promote: ' <<<"$out" || true)
+      # Push options cannot carry newlines, so the MR description is one line: exactly what changed,
+      # with the fileid, sha256 and internal Mod ID proving no bytes moved.
+      REWRITES=$(grep '^\[mods\] promote: ' <<<"$out" | sed 's/^\[mods\] promote: //' | paste -sd'; ' -)
+
+      # Commit as the token's own user (a project access token's bot user), never as a human.
+      IDENT=$(curl -fsS -H "PRIVATE-TOKEN: $RENOVATE_TOKEN" "$CI_API_V4_URL/user")
+      GIT_NAME=$(jq -r '.name // empty' <<<"$IDENT")
+      GIT_EMAIL=$(jq -r '.email // empty' <<<"$IDENT")
+      if [ -z "$GIT_NAME" ] || [ -z "$GIT_EMAIL" ]; then
+        echo "FATAL: $CI_API_V4_URL/user returned no name/email for the token"
+        exit 1
+      fi
+      git -c user.name="$GIT_NAME" -c user.email="$GIT_EMAIL" \
+        commit -m "chore: track $COUNT vints mod pin(s)" "$PINS"
+      git push \
+        -o merge_request.create \
+        -o merge_request.target="$CI_DEFAULT_BRANCH" \
+        -o merge_request.merge_when_pipeline_succeeds \
+        -o merge_request.remove_source_branch \
+        -o merge_request.title="chore: promote vints mod URL pins" \
+        -o merge_request.description="$REWRITES" \
+        "https://oauth2:$RENOVATE_TOKEN@$CI_SERVER_HOST/$CI_PROJECT_PATH.git" \
+        "HEAD:refs/heads/$BRANCH"
+      echo "opened an MR from $BRANCH: $REWRITES"
+
