@@ -63,10 +63,10 @@ VINTS_NFS_PATH = "/pvebackup"     # export; writable by uid 1001
 # into the image tag.
 _vints_mods = """\
 # Format: one line per mod, "<mod-id> <direct .zip URL>". The <mod-id> is the
-# install key -> $DATA_PATH/Mods/<id>.zip (deliberately NOT the URL basename,
-# which is often just /latest). Changing the URL re-downloads; keeping the id
-# stable never collides. Prefix a line with '#' to disable a mod.
-# primitivesurvival (Primitive Survival by SpearAndFang) pinned to v5.1.2 for VS 1.22.x.
+# install key -> $DATA_PATH/Mods/<id>.zip to prevent conflicts
+sortablestorage https://mods.vintagestory.at/download/81763/sortablestorage_3.0.0.zip
+hudclock https://mods.vintagestory.at/download/16782/hudclock-3.4.0.zip
+automapmarkers https://mods.vintagestory.at/download/90054/Auto+Map+Markers+5.0.3+-+Vintage+Story+1.22.zip
 """
 
 
