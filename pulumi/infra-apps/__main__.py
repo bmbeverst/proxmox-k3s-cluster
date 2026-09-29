@@ -503,6 +503,7 @@ reloader = k8s.helm.v3.Release(
         values={
             "reloader": {
                 "reloadStrategy": "annotations",
+                "reloadOnCreate": True,
                 "deployment": {
                     "resources": {
                         "requests": {"cpu": "10m", "memory": "64Mi"},
