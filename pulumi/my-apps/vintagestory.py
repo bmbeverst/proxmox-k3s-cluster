@@ -63,7 +63,7 @@ _vints_mods = """\
 # Format: one line per mod, "<mod-id> <direct .zip URL>". The <mod-id> is the
 # install key -> $DATA_PATH/Mods/<id>.zip to prevent conflicts
 sortablestorage https://mods.vintagestory.at/download/81763/sortablestorage_3.0.0.zip
-hudclock  https://mods.vintagestory.at/download/104745/HudClock_4.4.1_VS1.22.3.zip
+hudclock https://mods.vintagestory.at/download/104745/HudClock_4.4.1_VS1.22.3.zip
 automapmarkers https://mods.vintagestory.at/download/90054/Auto+Map+Markers+5.0.3+-+Vintage+Story+1.22.zip
 """
 
