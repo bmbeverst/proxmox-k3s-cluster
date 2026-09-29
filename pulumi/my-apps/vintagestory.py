@@ -58,14 +58,11 @@ VINTS_LB_IP = "10.10.1.91"  # kube-vip LoadBalancer VIP (static)
 VINTS_NFS_SERVER = "10.10.1.101"  # host serving the backup export
 VINTS_NFS_PATH = "/pvebackup"     # export; writable by uid 1001
 
-# ConfigMap: the mods list (direct .zip URLs, one per line; prefix with '#' to comment).
-_vints_mods = """\
-# Format: one line per mod, "<mod-id> <direct .zip URL>". The <mod-id> is the
-# install key -> $DATA_PATH/Mods/<id>.zip to prevent conflicts
-sortablestorage https://mods.vintagestory.at/download/81763/sortablestorage_3.0.0.zip
-hudclock https://mods.vintagestory.at/download/104745/HudClock_4.4.1_VS1.22.3.zip
-automapmarkers https://mods.vintagestory.at/download/90054/Auto+Map+Markers+5.0.3+-+Vintage+Story+1.22.zip
-"""
+# The mod pins are the source of truth and live in git: one "<key>: <version|url>" line per mod,
+# where a version pin's key is the mod's internal Mod ID (the same key Renovate tracks and the game
+# loads). The resolver in the image turns them into $DATA_PATH/Mods on every pod start.
+with open(os.path.join(os.path.dirname(__file__), "containers", "server", "vintagestory-mods.yaml")) as f:
+    _vints_mods = f.read()
 
 
 def _vints_env():
@@ -135,7 +132,7 @@ def register(namespace):
         metadata=ObjectMetaArgs(name="vints-config", namespace=NAMESPACE),
         data={
             "PORT": str(VINTS_PORT),
-            "mods.txt": _vints_mods,
+            "mods.yaml": _vints_mods,
         },
         opts=pulumi.ResourceOptions(depends_on=[namespace]),
     )
@@ -194,7 +191,7 @@ def register(namespace):
                             name="vints-installer",
                             image=VINTS_IMAGE,
                             image_pull_policy="Always",
-                            command=["/entrypoints/install-vints.sh"],
+                            command=["/entrypoints/resolve-vints-mods.sh", "--stage", "--mods", "/config/mods.yaml"],
                             env=_vints_env(),
                             security_context=k8s.core.v1.SecurityContextArgs(
                                 run_as_non_root=True,
