@@ -4,8 +4,10 @@
 #
 #   --check   --mods <pins>                    CI: scratch data path; resolve, verify and stage the set
 #   --promote --mods <pins>                    CI: rewrite promotable URL pins in place (idempotent)
-#   --stage   --mods <pins> [--data-path <p>]  init container: fetch what is missing, then make
-#                                              <p>/Mods exactly the pinned set
+#   --stage   --mods <pins> [--data-path <p>] [--seed <dir>]
+#                                              init container: merge the seeded depot bundle, fetch
+#                                              what is still missing, then make <p>/Mods exactly the
+#                                              pinned set
 #
 # Pins file: one "<key>: <version|url>" per line, "#" starts a comment.
 #   key    a version pin's key is the mod's internal Mod ID (the game keys on the modid, not on the
@@ -24,6 +26,7 @@ DOWNLOAD="https://mods.vintagestory.at/download"
 MODE=""
 PINS=""
 DATA_PATH_ARG=""
+SEED=""
 
 fail() { echo "[mods] ERROR: $*" >&2; exit 1; }
 log() { echo "[mods] $*"; }
@@ -33,7 +36,7 @@ usage() {
 usage:
   resolve-vints-mods.sh --check   --mods <pins>
   resolve-vints-mods.sh --promote --mods <pins>
-  resolve-vints-mods.sh --stage   --mods <pins> [--data-path <dir>]
+  resolve-vints-mods.sh --stage   --mods <pins> [--data-path <dir>] [--seed <dir>]
 EOF
 }
 
@@ -42,6 +45,7 @@ while [[ $# -gt 0 ]]; do
     --check|--stage|--promote) MODE="$1"; shift ;;
     --mods) [[ $# -ge 2 ]] || fail "--mods needs a path"; PINS="$2"; shift 2 ;;
     --data-path) [[ $# -ge 2 ]] || fail "--data-path needs a path"; DATA_PATH_ARG="$2"; shift 2 ;;
+    --seed) [[ $# -ge 2 ]] || fail "--seed needs a path"; SEED="$2"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     *) usage; fail "unknown argument '$1'" ;;
   esac
@@ -50,6 +54,8 @@ done
 [[ -n "$MODE" ]] || { usage; fail "one of --check, --stage or --promote is required"; }
 [[ -n "$PINS" ]] || fail "--mods <pins> is required"
 [[ -f "$PINS" ]] || fail "pins file '$PINS' not found"
+[[ -z "$SEED" || "$MODE" == "--stage" ]] \
+  || fail "--seed is only valid with --stage (--check verifies the pins against live upstream)"
 [[ -n "${VS_VERSION:-}" ]] || fail "VS_VERSION is not set (the image bakes it, CI exports it)"
 [[ "$VS_VERSION" =~ ^([0-9]+\.[0-9]+)\.[0-9]+$ ]] || fail "VS_VERSION '$VS_VERSION' is not X.Y.Z"
 MINOR="${BASH_REMATCH[1]}"
@@ -103,6 +109,41 @@ url_fileid() {
   if [[ "$1" =~ ^https://mods\.vintagestory\.at/download/([0-9]+)([/?].*)?$ ]]; then
     printf '%s' "${BASH_REMATCH[1]}"
   fi
+}
+
+# --- seed (bundle image) ------------------------------------------------------
+# The CI-baked bundle image carries the same verified depot the resolver would otherwise download. The
+# seed init container stages it at --seed, and seed_depot merges it in before anything is resolved (the
+# catalog decides cache hits), so a pin bump lands without a single Mod DB fetch. A dir that is not
+# there is a no-op, so a pod without the bundle behaves exactly as it did without --seed.
+
+seed_depot() {  # <seed dir>
+  local dir="$1" src name n=0 entries bundle
+  [[ -d "$dir" ]] || return 0
+  [[ -f "$dir/catalog.json" ]] \
+    || fail "seed '$dir' carries no catalog.json (CI only publishes a complete bundle)"
+  jq -e 'type == "object"' "$dir/catalog.json" > /dev/null \
+    || fail "seed '$dir/catalog.json' is not a JSON object"
+  # Names are content-addressed, so a name that is already in the depot is the right file unless its
+  # bytes no longer hash to it: the bundle then repairs the cache before fetch_artifact sees it.
+  for src in "$dir"/depot/*.zip; do
+    [[ -e "$src" ]] || continue
+    name="${src##*/}"
+    n=$((n + 1))
+    if [[ -e "$DEPOT/$name" ]]; then
+      [[ "$(sha256sum "$DEPOT/$name" | cut -d' ' -f1)" == "${name%.zip}" ]] && continue
+      log "seed: repairing corrupt depot/$name from the bundle"
+    fi
+    cp "$src" "$DEPOT/$name"
+  done
+  # The seed wins the keys it carries; every key the PVC already had stays (an older version stays
+  # usable for a rollback).
+  entries="$(jq 'length' "$dir/catalog.json")"
+  jq -s '.[0] * .[1]' "$CATALOG" "$dir/catalog.json" > "$WORK/catalog.new" \
+    || fail "seed '$dir/catalog.json' cannot be merged into $CATALOG"
+  mv "$WORK/catalog.new" "$CATALOG"
+  bundle="$(jq -c . "$dir/bundle.json" 2> /dev/null || true)"
+  log "seed: $n archive(s), $entries catalog entries from $dir${bundle:+ (bundle $bundle)}"
 }
 
 # --- pins --------------------------------------------------------------------
@@ -395,6 +436,7 @@ promote_all() {
 
 case "$MODE" in
   --check|--stage)
+    [[ -z "$SEED" ]] || seed_depot "$SEED"
     resolve_all
     stage_apply
     ;;
