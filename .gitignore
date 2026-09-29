@@ -5,3 +5,6 @@ venv/
 __pycache__/
 .vault_pass
 vault
+# Transient CI artifacts of bake:vints-mods: staged in the repo root, never committed
+.ci-bundle/
+.ci-depot/

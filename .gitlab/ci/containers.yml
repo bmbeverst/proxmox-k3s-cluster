@@ -157,6 +157,87 @@ build:vints-backup:
         - .gitlab/ci/containers.yml
     - when: never
 
+# The mod bundle image: CI resolves + verifies every pin once and publishes the resulting depot, so
+# the pod seeds its PVC depot from the registry instead of the Mod DB. `:latest` is pushed from the
+# default branch only, so a feature branch can never clobber what the cluster pulls.
+bake:vints-mods:
+  stage: build
+  image: quay.io/containers/podman:v5.8.7-immutable
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "push"
+      changes:
+        - pulumi/my-apps/containers/server/vintagestory-mods.yaml
+        - pulumi/my-apps/containers/server/vintagestory-version.yaml
+        - pulumi/my-apps/containers/server/entrypoints/**
+        - pulumi/my-apps/containers/mods/**
+        - renovate.json
+        - .gitlab/ci/containers.yml
+    - when: never
+  script:
+    # curl and unzip already ship in this image; only jq is missing.
+    - dnf -y -q install jq
+    - |
+      set -euo pipefail
+      PINS=pulumi/my-apps/containers/server/vintagestory-mods.yaml
+      VS_VERSION=$(sed -n 's/^vintagestory_version:[[:space:]]*//p' \
+        pulumi/my-apps/containers/server/vintagestory-version.yaml)
+      export VS_VERSION
+      PIN_COUNT=$(grep -c '^[^#[:space:]]' "$PINS" || true)
+      [ "$PIN_COUNT" -gt 0 ] || { echo "FATAL: $PINS pins no mods"; exit 1; }
+      IMG="$CI_REGISTRY_IMAGE/vints-mods:latest"
+
+      # The cold fetch check:vints-mods already does, staged into a real depot this time.
+      pulumi/my-apps/containers/server/entrypoints/resolve-vints-mods.sh \
+        --stage --mods "$PINS" --data-path .ci-depot
+
+      # Package exactly the depot the cluster seeds from.
+      rm -rf .ci-bundle
+      mkdir -p .ci-bundle/depot
+      cp .ci-depot/.vints-mods/catalog.json .ci-bundle/catalog.json
+      cp .ci-depot/.vints-mods/depot/*.zip .ci-bundle/depot/
+      jq -nc --arg v "$VS_VERSION" \
+        --arg p "$(sha256sum "$PINS" | cut -d' ' -f1)" \
+        --arg c "$CI_COMMIT_SHA" \
+        '{vs_version: $v, pins_sha256: $p, commit: $c}' > .ci-bundle/bundle.json
+
+      # A published bundle is always complete: one archive per pin, asserted before the push.
+      ARCHIVES=$(ls .ci-bundle/depot/*.zip | wc -l)
+      [ "$ARCHIVES" = "$PIN_COUNT" ] \
+        || { echo "FATAL: the bundle holds $ARCHIVES archive(s) for $PIN_COUNT pin(s)"; exit 1; }
+
+      podman build -f pulumi/my-apps/containers/mods/Dockerfile -t "$IMG" .
+
+      # The bundle is only worth publishing if it seeds: stage the image's own /bundle into a scratch
+      # data path and require the pins to install from it without a single fetch. Every branch runs
+      # this, so a broken seed fails the MR pipeline and not the post-merge one.
+      D=$(mktemp -d)
+      mkdir -p "$D/seed"
+      CTR=$(podman create "$IMG")
+      podman cp "$CTR:/bundle/." "$D/seed/"
+      podman rm -f "$CTR" > /dev/null
+      if ! out=$(pulumi/my-apps/containers/server/entrypoints/resolve-vints-mods.sh \
+        --stage --mods "$PINS" --data-path "$D/data" --seed "$D/seed" 2>&1); then
+        echo "$out"
+        echo "FATAL: the bundle does not seed a fresh data path"
+        exit 1
+      fi
+      if grep -q 'downloading' <<<"$out"; then
+        echo "$out"
+        echo "FATAL: seeding from the bundle still fetched from the Mod DB"
+        exit 1
+      fi
+      [ "$(ls "$D/data/Mods"/*.zip | wc -l)" = "$PIN_COUNT" ] \
+        || { echo "$out"; echo "FATAL: the seeded stage did not install $PIN_COUNT mod(s)"; exit 1; }
+      echo "the bundle seeds a fresh data path: $PIN_COUNT archive(s), zero fetches"
+
+      if [ "$CI_COMMIT_BRANCH" != "$CI_DEFAULT_BRANCH" ]; then
+        echo "not $CI_DEFAULT_BRANCH: built and verified $IMG, leaving :latest alone"
+        exit 0
+      fi
+      podman login -u "$CI_REGISTRY_USER" -p "$CI_REGISTRY_PASSWORD" "$CI_REGISTRY"
+      podman push "$IMG"
+      echo "published $IMG: $ARCHIVES archive(s) for VS $VS_VERSION"
+
 # Container scanning
 container_scanning:
   rules:
