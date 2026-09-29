@@ -93,9 +93,29 @@
       "extractVersion": "^pulumi-kubernetes-operator-(?<version>\\d+\\.\\d+\\.\\d+)$",
       "versioning": "helm",
       "automerge": false
+    },
+    {
+      "description": "Mods: no release-age cooldown - the boot smoke is the gate",
+      "matchDatasources": [
+        "custom.vintagestory_mod_1_22"
+      ],
+      "minimumReleaseAge": null
     }
   ],
   "customManagers": [
+    {
+      "customType": "regex",
+      "description": "vints mods: key is the mod's internal Mod ID; datasource is fixed per game minor",
+      "managerFilePatterns": [
+        "/pulumi/my-apps/containers/server/vintagestory-mods\\.yaml$/"
+      ],
+      "matchStrings": [
+        "(?:^|\\n)(?<depName>[A-Za-z0-9_.-]+):[ \\t]*\"?(?<currentValue>[0-9]+\\.[0-9]+[^\\s\"#]*)"
+      ],
+      "autoReplaceStringTemplate": "\n{{{depName}}}: {{{newValue}}}",
+      "datasourceTemplate": "custom.vintagestory_mod_1_22",
+      "versioningTemplate": "semver-coerced"
+    },
     {
       "customType": "regex",
       "managerFilePatterns": [
@@ -116,6 +136,13 @@
       "defaultRegistryUrlTemplate": "https://api.vintagestory.at/stable-unstable.json",
       "transformTemplates": [
         "{\"releases\": $map($keys($), function($v) {({\"version\": $v})})}"
+      ]
+    },
+    "vintagestory_mod_1_22": {
+      "format": "json",
+      "defaultRegistryUrlTemplate": "https://mods.vintagestory.at/api/mod/{{{packageName}}}",
+      "transformTemplates": [
+        "{\"releases\": [$map($filter($.mod.releases, function($r) { $count($filter($r.tags, function($t) { $boolean($match($t, /^1\\.22\\.[0-9]+$/)) })) > 0 }), function($r) { ({\"version\": $r.modversion}) })]}"
       ]
     }
   }

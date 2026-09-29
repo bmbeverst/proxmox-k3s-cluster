@@ -30,8 +30,8 @@ check:vints-mods:
       # would quietly track a game version the image does not run. A VS bump fails here until
       # renovate.json follows (two lines: the manager's datasourceTemplate + a customDatasources key).
       jq -e --arg ds "custom.$DS_NAME" --arg key "$DS_NAME" '
-        ([.customManagers[] | select(.description | test("vints mods"))] | length == 1)
-        and ([.customManagers[] | select(.description | test("vints mods"))][0].datasourceTemplate == $ds)
+        ([.customManagers[] | select((.description // "") | test("vints mods"))] | length == 1)
+        and ([.customManagers[] | select((.description // "") | test("vints mods"))][0].datasourceTemplate == $ds)
         and (.customDatasources | has($key))
       ' renovate.json > /dev/null
       pulumi/my-apps/containers/server/entrypoints/resolve-vints-mods.sh \
