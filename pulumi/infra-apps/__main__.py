@@ -488,6 +488,33 @@ kube_state_metrics = k8s.helm.v3.Release(
     ),
 )
 
+# Reloader: Rolls a workload when its ConfigMap or Secrets changes
+# Annotation: reloader.stakater.com/auto: "true"
+reloader = k8s.helm.v3.Release(
+    "reloader",
+    k8s.helm.v3.ReleaseArgs(
+        chart="reloader",
+        version=_chart_deps["reloader"]["version"],
+        namespace="reloader",
+        create_namespace=True,
+        repository_opts=k8s.helm.v3.RepositoryOptsArgs(
+            repo=_chart_deps["reloader"]["repository"],
+        ),
+        values={
+            "reloader": {
+                "reloadStrategy": "annotations",
+                "deployment": {
+                    "resources": {
+                        "requests": {"cpu": "10m", "memory": "64Mi"},
+                        "limits": {"memory": "128Mi"},
+                    },
+                },
+            },
+        },
+        timeout=600,
+    ),
+)
+
 # Tailscale operator. Auth is the OAuth client in stack config (tailscale:clientID /
 # tailscale:clientSecret); the chart also installs the tailscale.com CRDs.
 _tailscale_cfg = pulumi.Config("tailscale")

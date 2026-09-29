@@ -30,3 +30,6 @@ dependencies:
   - name: tailscale-operator
     repository: https://pkgs.tailscale.com/helmcharts
     version: 1.102.4
+  - name: reloader
+    repository: https://stakater.github.io/stakater-charts
+    version: 2.2.17

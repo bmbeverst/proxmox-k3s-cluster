@@ -59,13 +59,11 @@ VINTS_NFS_SERVER = "10.10.1.101"  # host serving the backup export
 VINTS_NFS_PATH = "/pvebackup"     # export; writable by uid 1001
 
 # ConfigMap: the mods list (direct .zip URLs, one per line; prefix with '#' to comment).
-# Update = edit + push; a pod restart re-syncs it. The game version is not here - it is baked
-# into the image tag.
 _vints_mods = """\
 # Format: one line per mod, "<mod-id> <direct .zip URL>". The <mod-id> is the
 # install key -> $DATA_PATH/Mods/<id>.zip to prevent conflicts
 sortablestorage https://mods.vintagestory.at/download/81763/sortablestorage_3.0.0.zip
-hudclock https://mods.vintagestory.at/download/16782/hudclock-3.4.0.zip
+hudclock  https://mods.vintagestory.at/download/104745/HudClock_4.4.1_VS1.22.3.zip
 automapmarkers https://mods.vintagestory.at/download/90054/Auto+Map+Markers+5.0.3+-+Vintage+Story+1.22.zip
 """
 
@@ -160,7 +158,11 @@ def register(namespace):
     # the main container then runs the server as PID 1.
     vints = k8s.apps.v1.Deployment(
         "vints",
-        metadata=ObjectMetaArgs(name="vints", namespace=NAMESPACE),
+        metadata=ObjectMetaArgs(
+            name="vints",
+            namespace=NAMESPACE,
+            annotations={"reloader.stakater.com/auto": "true"},
+        ),
         spec=k8s.apps.v1.DeploymentSpecArgs(
             replicas=1,
             # delete-then-create instead of two servers on save
@@ -171,7 +173,11 @@ def register(namespace):
             ),
             selector=k8s.meta.v1.LabelSelectorArgs(match_labels={"app": "vints"}),
             template=k8s.core.v1.PodTemplateSpecArgs(
-                metadata=ObjectMetaArgs(labels={"app": "vints"}),
+                metadata=ObjectMetaArgs(
+                    labels={"app": "vints"},
+                    # Placeholder so the nested ignore below can resolve
+                    annotations={"reloader.stakater.com/last-reloaded-from": "unset"},
+                ),
                 spec=k8s.core.v1.PodSpecArgs(
                     affinity=_vints_preferred_nodes(),
                     termination_grace_period_seconds=30,
@@ -270,7 +276,12 @@ def register(namespace):
                 ),
             ),
         ),
-        opts=pulumi.ResourceOptions(depends_on=[namespace, vints_regcred, vints_data, vints_config]),
+        opts=pulumi.ResourceOptions(
+            depends_on=[namespace, vints_regcred, vints_data, vints_config],
+            ignore_changes=[
+                'spec.template.metadata.annotations["reloader.stakater.com/last-reloaded-from"]',
+            ],
+        ),
     )
 
     # LoadBalancer on static kube-vip VIP
