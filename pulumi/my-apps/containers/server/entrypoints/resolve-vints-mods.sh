@@ -2,10 +2,10 @@
 # Resolves the vints mod pins into $DATA_PATH/Mods from a content-addressed depot on the data PVC, so
 # a steady-state boot (same pins, same game minor) needs no network at all.
 #
-#   --check   --mods <pins>                  CI: scratch dir; resolve + verify every pin, print the set
-#   --promote --mods <pins>                  CI: rewrite promotable URL pins in place (idempotent)
+#   --check   --mods <pins>                    CI: scratch data path; resolve, verify and stage the set
+#   --promote --mods <pins>                    CI: rewrite promotable URL pins in place (idempotent)
 #   --stage   --mods <pins> [--data-path <p>]  init container: fetch what is missing, then make
-#                                            <p>/Mods exactly the pinned set
+#                                              <p>/Mods exactly the pinned set
 #
 # Pins file: one "<key>: <version|url>" per line, "#" starts a comment.
 #   key    a version pin's key is the mod's internal Mod ID (the game keys on the modid, not on the
@@ -55,52 +55,38 @@ done
 MINOR="${BASH_REMATCH[1]}"
 MINOR_RE="^${MINOR//./\\.}\\.[0-9]+$"
 
+# --- layout ------------------------------------------------------------------
+# --check and --promote work in a throwaway data path, so all three modes resolve the pins the exact
+# way --stage does.
 if [[ "$MODE" == "--stage" ]]; then
   DATA_PATH="${DATA_PATH_ARG:-${DATA_PATH:-/data}}"
-  META="$DATA_PATH/.vints-mods"
   # The init container's rootfs is read-only and has no /tmp: scratch lives on the data PVC.
-  WORK="$META/tmp"
-  mkdir -p "$DATA_PATH/Mods" "$META/depot" "$WORK"
+  trap 'rm -rf "$WORK"' EXIT
 else
-  # --check and --promote never touch the data PVC.
-  WORK="$(mktemp -d)"
-  META="$WORK/data/.vints-mods"
-  mkdir -p "$META/depot" "$META/tmp"
+  DATA_PATH="$(mktemp -d)"
+  trap 'rm -rf "$DATA_PATH"' EXIT
 fi
+META="$DATA_PATH/.vints-mods"
 DEPOT="$META/depot"
-TMP="$META/tmp"
+WORK="$META/tmp"
 CATALOG="$META/catalog.json"
+mkdir -p "$DATA_PATH/Mods" "$DEPOT" "$WORK"
 [[ -f "$CATALOG" ]] || echo '{}' > "$CATALOG"
-trap 'rm -rf "$WORK"' EXIT
 
 # --- depot + catalog ---------------------------------------------------------
-# catalog.json: "<key>:<version>:<minor>" and "url:<url>:<minor>" -> {fileid, filename, sha256},
-# plus "fileid:<fileid>:<minor>" -> sha256 so a promoted URL pin stages from the depot as well.
+# catalog.json maps "<key>:<version>:<minor>" and "url:<url>:<minor>" to the sha256 of the archive,
+# plus "fileid:<fileid>:<minor>" so a URL pin promoted to a version pin reuses the depot bytes.
 
 # The sha256 the catalog records for <key>, or "".
-catalog_sha() {
-  jq -r --arg k "$1" '.[$k] // empty | if type == "object" then (.sha256 // empty) else . end' "$CATALOG"
+catalog_sha() { jq -r --arg k "$1" '.[$k] // empty' "$CATALOG"; }
+
+catalog_put() {  # <key> <sha256>
+  jq --arg k "$1" --arg s "$2" '.[$k] = $s' "$CATALOG" > "$WORK/catalog.new"
+  mv "$WORK/catalog.new" "$CATALOG"
 }
 
-# A string field of a catalog entry, or "".
-catalog_field() {
-  jq -r --arg k "$1" --arg f "$2" '(.[$k] // {}) | if type == "object" then (.[$f] // empty) else empty end' \
-    "$CATALOG"
-}
-
-catalog_put() {  # <key> <json value>
-  jq --arg k "$1" --argjson v "$2" '.[$k] = $v' "$CATALOG" > "$TMP/catalog.new"
-  mv "$TMP/catalog.new" "$CATALOG"
-}
-
-# Forgets every entry that holds <sha>, and the depot file itself: the next attempt re-downloads.
-catalog_drop_sha() {
-  jq --arg s "$1" \
-    'with_entries(select((if (.value | type) == "object" then (.value.sha256 // "") else .value end) != $s))' \
-    "$CATALOG" > "$TMP/catalog.new"
-  mv "$TMP/catalog.new" "$CATALOG"
-  rm -f "$DEPOT/$1.zip"
-}
+# Forgets <sha>'s depot file: the next attempt re-downloads and overwrites the stale catalog entry.
+catalog_drop_sha() { rm -f "$DEPOT/$1.zip"; }
 
 # 0 when the depot holds <sha> and the bytes still hash to it.
 depot_has() {
@@ -116,34 +102,34 @@ url_fileid() {
 }
 
 # --- pins --------------------------------------------------------------------
-# "<lineno>\t<key>\t<version|url>\t<value>" for every pin line; comments and blank lines are skipped.
+# parse_pins fills the PIN_* arrays; the same index is the same pin line.
+
+# The first duplicated input line, or "". awk, not head: head closing early SIGPIPEs the pipeline.
+first_dup() { sort | uniq -d | awk 'NR == 1 { d = $0 } END { print d }'; }
+
+# Reads the real pin lines into PIN_*; comments and blank lines are skipped.
 parse_pins() {
-  local lineno=0 line key value dup
-  : > "$WORK/pins.tsv"
-  while IFS= read -r line || [[ -n "$line" ]]; do
-    lineno=$((lineno + 1))
-    line="${line%$'\r'}"
-    if [[ -z "$line" || "$line" =~ ^[[:space:]]*$ ]]; then continue; fi
-    if [[ "$line" =~ ^[[:space:]]*# ]]; then continue; fi
-    [[ "$line" =~ ^[[:space:]]*([A-Za-z0-9_.-]+):[[:space:]]*(.*)$ ]] \
-      || fail "$PINS:$lineno: not a '<key>: <version|url>' line: '$line'"
+  local lineno rest key value kind dup
+  PIN_LINENO=() PIN_KEY=() PIN_KIND=() PIN_VALUE=()
+  # One awk pass drops CRs, a trailing comment and the surrounding blanks, and numbers the lines so
+  # a failure can name the line to edit.
+  while IFS=$'\t' read -r lineno rest; do
+    [[ "$rest" =~ ^([A-Za-z0-9_.-]+):[[:space:]]*(.*)$ ]] \
+      || fail "$PINS:$lineno: not a '<key>: <version|url>' line: '$rest'"
     key="${BASH_REMATCH[1]}"
     value="${BASH_REMATCH[2]}"
-    value="${value%%[[:space:]]#*}"                 # drop a trailing "# comment"
-    value="${value%"${value##*[![:space:]]}"}"      # trim
-    value="${value#"${value%%[![:space:]]*}"}"
     if [[ "$value" == https://* ]]; then
-      printf '%s\t%s\turl\t%s\n' "$lineno" "$key" "$value" >> "$WORK/pins.tsv"
+      kind="url"
     elif [[ "$value" =~ ^[0-9]+\.[0-9]+[^[:space:]]*$ ]]; then
-      printf '%s\t%s\tversion\t%s\n' "$lineno" "$key" "$value" >> "$WORK/pins.tsv"
+      kind="version"
     else
       fail "$PINS:$lineno: value must be a version or a full https URL, got '$value'"
     fi
-  done < "$PINS"
-  dup="$(cut -f2 "$WORK/pins.tsv" | sort | uniq -d | awk 'NR == 1 { d = $0 } END { print d }')"
+    PIN_LINENO+=("$lineno") PIN_KEY+=("$key") PIN_KIND+=("$kind") PIN_VALUE+=("$value")
+  done < <(awk '{ sub(/\r$/, ""); sub(/(^|[ \t])#.*/, ""); gsub(/^[ \t]+|[ \t]+$/, "") } length { print NR "\t" $0 }' "$PINS")
+  dup="$(printf '%s\n' "${PIN_KEY[@]}" | first_dup)"
   [[ -z "$dup" ]] || fail "$PINS: key '$dup' is pinned twice"
 }
-
 # --- Mod DB ------------------------------------------------------------------
 # Body of GET /api/mod/<query>, or non-zero when the mod is not on the Mod DB. A bad urlalias
 # answers 200 with a {"statuscode":"404"} body, so require .mod.modid instead of trusting the status.
@@ -154,7 +140,7 @@ api_mod() {
   printf '%s' "$json"
 }
 
-# Fatal resolution of a version pin: sets API_FILEID / API_FILENAME / API_MODIDSTR.
+# Fatal resolution of a version pin: sets API_FILEID / API_MODIDSTR.
 api_version_release() {
   local ctx="$1" key="$2" pin="$3" json rel
   json="$(api_mod "$key")" \
@@ -169,7 +155,6 @@ api_version_release() {
     fail "$ctx: '$key' has no released version '$pin'"
   fi
   API_FILEID="$(jq -r '.fileid // empty' <<<"$rel")"
-  API_FILENAME="$(jq -r '.filename // empty' <<<"$rel")"
   API_MODIDSTR="$(jq -r '.modidstr // empty' <<<"$rel")"
   [[ -n "$API_FILEID" ]] || fail "$ctx: release '$pin' has no fileid"
   [[ "$API_MODIDSTR" == "$key" ]] \
@@ -181,14 +166,14 @@ api_version_release() {
 # must satisfy: a plain modid, and, if it declares one, a game dependency the image can satisfy.
 read_modinfo() {
   local ctx="$1" zip="$2" dep newest
-  if ! unzip -p "$zip" modinfo.json > "$TMP/modinfo.json" 2>/dev/null || [[ ! -s "$TMP/modinfo.json" ]]; then
-    rm -f "$TMP/modinfo.json"
+  if ! unzip -p "$zip" modinfo.json > "$WORK/modinfo.json" 2>/dev/null || [[ ! -s "$WORK/modinfo.json" ]]; then
+    rm -f "$WORK/modinfo.json"
     fail "$ctx: no readable modinfo.json at the zip root"
   fi
-  MODINFO_MODID="$(jq -r '.modid // empty' "$TMP/modinfo.json")"
-  MODINFO_VERSION="$(jq -r '.version // empty' "$TMP/modinfo.json")"
-  dep="$(jq -r '.dependencies.game? // empty' "$TMP/modinfo.json")"
-  rm -f "$TMP/modinfo.json"
+  MODINFO_MODID="$(jq -r '.modid // empty' "$WORK/modinfo.json")"
+  MODINFO_VERSION="$(jq -r '.version // empty' "$WORK/modinfo.json")"
+  dep="$(jq -r '.dependencies.game? // empty' "$WORK/modinfo.json")"
+  rm -f "$WORK/modinfo.json"
   [[ -n "$MODINFO_MODID" ]] || fail "$ctx: modinfo.json carries no modid"
   [[ "$MODINFO_MODID" =~ ^[A-Za-z0-9_.-]+$ ]] \
     || fail "$ctx: modinfo.json modid '$MODINFO_MODID' is not a plain id"
@@ -200,28 +185,26 @@ read_modinfo() {
 }
 
 # Uses a verified depot artifact: sets the ART_* globals.
-use_cached() {  # <ctx> <sha> <fileid>
+use_cached() {  # <ctx> <sha256>
   read_modinfo "$1" "$DEPOT/$2.zip"
   ART_SHA="$2"
-  ART_FILEID="$3"
   ART_MODID="$MODINFO_MODID"
   ART_VERSION="$MODINFO_VERSION"
   ART_SOURCE="depot"
 }
 
-
 # Makes sure the pinned artifact is in the depot, downloading it only when it is not there.
-# Sets ART_SHA / ART_FILEID / ART_MODID / ART_VERSION / ART_SOURCE.
-fetch_artifact() {
+# Sets ART_SHA / ART_MODID / ART_VERSION / ART_SOURCE.
+fetch_artifact() {  # <ctx> <kind> <key> <version|url>
   local ctx="$1" kind="$2" key="$3" value="$4"
-  local catkey url fileid cached sha tmpfile
+  local catkey fileid url cached sha tmpfile
   if [[ "$kind" == version ]]; then catkey="$key:$value:$MINOR"; else catkey="url:$value:$MINOR"; fi
 
   # 1) already verified and cached: no API call, no download
   cached="$(catalog_sha "$catkey")"
   if [[ -n "$cached" ]]; then
     if depot_has "$cached"; then
-      use_cached "$ctx" "$cached" "$(catalog_field "$catkey" fileid)"
+      use_cached "$ctx" "$cached"
       return 0
     fi
     log "$ctx: depot/$cached.zip is missing or corrupt; dropping the entry and fetching again"
@@ -233,12 +216,11 @@ fetch_artifact() {
     api_version_release "$ctx" "$key" "$value"
     fileid="$API_FILEID"
     url="$DOWNLOAD/$fileid"
-    # 3) the same bytes are often in the depot already (e.g. a URL pin promoted to this fileid)
+    # 3) the same bytes are often in the depot already (a URL pin promoted to this fileid)
     cached="$(catalog_sha "fileid:$fileid:$MINOR")"
     if [[ -n "$cached" ]] && depot_has "$cached"; then
-      use_cached "$ctx" "$cached" "$fileid"
-      catalog_put "$catkey" "$(jq -nc --arg f "$fileid" --arg n "$API_FILENAME" --arg s "$cached" \
-        '{fileid: $f, filename: $n, sha256: $s}')"
+      use_cached "$ctx" "$cached"
+      catalog_put "$catkey" "$cached"
       return 0
     fi
   else
@@ -247,66 +229,65 @@ fetch_artifact() {
   fi
 
   # 4) download, hash, verify, then move into the depot
-  tmpfile="$TMP/download.$$.zip"
+  tmpfile="$WORK/download.$$.zip"
   log "$ctx: downloading $url"
   curl -fsSL --retry 3 --retry-delay 2 "$url" -o "$tmpfile" || fail "$ctx: download failed: $url"
   sha="$(sha256sum "$tmpfile" | cut -d' ' -f1)"
   read_modinfo "$ctx" "$tmpfile"
   ART_SHA="$sha"
-  ART_FILEID="$fileid"
   ART_MODID="$MODINFO_MODID"
   ART_VERSION="$MODINFO_VERSION"
   ART_SOURCE="downloaded"
   mv "$tmpfile" "$DEPOT/$sha.zip"
-  catalog_put "$catkey" "$(jq -nc --arg f "$fileid" --arg n "${API_FILENAME:-}" --arg s "$sha" \
-    '{fileid: $f, filename: $n, sha256: $s}')"
+  catalog_put "$catkey" "$sha"
   if [[ -n "$fileid" ]]; then
-    catalog_put "fileid:$fileid:$MINOR" "$(jq -nc --arg s "$sha" '$s')"
+    catalog_put "fileid:$fileid:$MINOR" "$sha"
   fi
 }
-
 # --- the pinned set ----------------------------------------------------------
-# Resolves every pin and appends "key kind value modid version fileid sha256" to the plan.
+# Phase 1: resolve every pin into the RES_* arrays; the same index is the same pin line. Anything
+# that cannot be resolved to verified bytes fails before Mods/ is touched, so there is no partial set.
 resolve_all() {
-  local lineno key kind value dup ctx
-  : > "$WORK/plan.tsv"
-  : > "$WORK/modids.tsv"
+  local i ctx dup dup_keys=""
+  RES_KEY=() RES_MODID=() RES_VERSION=() RES_SHA=()
   parse_pins
-  while IFS=$'\t' read -r lineno key kind value; do
-    ctx="$PINS:$lineno ($key)"
-    fetch_artifact "$ctx" "$kind" "$key" "$value"
-    if [[ "$kind" == version ]]; then
-      [[ "$ART_MODID" == "$key" ]] || fail "$ctx: the zip holds internal Mod ID '$ART_MODID', expected '$key'"
-      [[ "$ART_VERSION" == "$value" ]] || fail "$ctx: the zip holds version '$ART_VERSION', expected '$value'"
+  for i in "${!PIN_KEY[@]}"; do
+    ctx="$PINS:${PIN_LINENO[$i]} (${PIN_KEY[$i]})"
+    fetch_artifact "$ctx" "${PIN_KIND[$i]}" "${PIN_KEY[$i]}" "${PIN_VALUE[$i]}"
+    if [[ "${PIN_KIND[$i]}" == version ]]; then
+      [[ "$ART_MODID" == "${PIN_KEY[$i]}" ]] \
+        || fail "$ctx: the zip holds internal Mod ID '$ART_MODID', expected '${PIN_KEY[$i]}'"
+      [[ "$ART_VERSION" == "${PIN_VALUE[$i]}" ]] \
+        || fail "$ctx: the zip holds version '$ART_VERSION', expected '${PIN_VALUE[$i]}'"
     fi
-    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
-      "$key" "$kind" "$value" "$ART_MODID" "$ART_VERSION" "${ART_FILEID:--}" "$ART_SHA" >> "$WORK/plan.tsv"
-    printf '%s\t%s\n' "$key" "$ART_MODID" >> "$WORK/modids.tsv"
-    log "$ctx: $kind $value -> modid $ART_MODID, version $ART_VERSION, fileid ${ART_FILEID:--}, sha256 $ART_SHA ($ART_SOURCE)"
-  done < "$WORK/pins.tsv"
-  [[ -s "$WORK/plan.tsv" ]] || log "note: '$PINS' pins no mods"
-  dup="$(cut -f2 "$WORK/modids.tsv" | sort | uniq -d | awk 'NR == 1 { d = $0 } END { print d }')"
-  [[ -z "$dup" ]] || fail "internal Mod ID '$dup' is pinned more than once: $(awk -F'\t' -v m="$dup" \
-    '$2 == m { print $1 }' "$WORK/modids.tsv" | paste -sd, -)"
+    RES_KEY+=("${PIN_KEY[$i]}") RES_MODID+=("$ART_MODID") RES_VERSION+=("$ART_VERSION") RES_SHA+=("$ART_SHA")
+    log "$ctx: ${PIN_KIND[$i]} ${PIN_VALUE[$i]} -> modid $ART_MODID, version $ART_VERSION, sha256 $ART_SHA ($ART_SOURCE)"
+  done
+  [[ ${#RES_KEY[@]} -gt 0 ]] || log "note: '$PINS' pins no mods"
+  dup="$(printf '%s\n' "${RES_MODID[@]}" | first_dup)"
+  if [[ -n "$dup" ]]; then
+    for i in "${!RES_MODID[@]}"; do
+      [[ "${RES_MODID[$i]}" == "$dup" ]] || continue
+      dup_keys+="${dup_keys:+,}${RES_KEY[$i]}"
+    done
+    fail "internal Mod ID '$dup' is pinned more than once: $dup_keys"
+  fi
+  log "resolved every pin against Vintage Story $VS_VERSION (minor $MINOR)"
 }
 
 # --- stage (init container) --------------------------------------------------
-# Anything in Mods/ that is not a pinned <key>.zip goes: the deliberate, logged removal path.
+# Every MODS_KEEP entry is a pinned <key>.zip, so anything else in Mods/ is a leftover: the
+# deliberate, logged removal path.
+declare -A MODS_KEEP=()
+
 prune_mods() {
-  local file base stem
+  local file base
   for file in "$DATA_PATH/Mods"/*; do
     [[ -e "$file" ]] || continue
-    base="$(basename "$file")"
-    stem="${base%.*}"
+    base="${file##*/}"
     case "$base" in
       *.zip|*.url)
-        if awk -F'\t' -v k="$stem" '$1 == k { pinned = 1 } END { exit (pinned ? 0 : 1) }' "$WORK/plan.tsv"; then
-          if [[ "$base" != *.zip ]]; then
-            rm -f "$file"
-            log "prune: removed $base (legacy URL stamp)"
-          fi
-          continue
-        fi
+        if [[ -n "${MODS_KEEP[$base]:-}" ]]; then continue; fi
         rm -f "$file"
         log "prune: removed $base (not in the pinned set)"
         ;;
@@ -315,106 +296,101 @@ prune_mods() {
   done
 }
 
-# Phase 2: verify the depot bytes, then make Mods/ exactly the pinned set. Pure local I/O.
+# Phase 2: make Mods/ exactly the resolved set. Pure local I/O: phase 1 verified every sha256.
 stage_apply() {
-  local key kind value modid version fileid sha file actual
-  while IFS=$'\t' read -r key kind value modid version fileid sha; do
-    file="$DEPOT/$sha.zip"
-    [[ -f "$file" ]] || fail "key '$key': depot/$sha.zip vanished after it was staged"
-    actual="$(sha256sum "$file" | cut -d' ' -f1)"
-    if [[ "$actual" != "$sha" ]]; then
-      catalog_drop_sha "$sha"
-      fail "key '$key': depot/$sha.zip hashes to $actual, expected $sha; dropped it, the next attempt re-downloads"
-    fi
-    cp "$file" "$DATA_PATH/Mods/$key.zip"
-    log "install: $key.zip (modid $modid, version $version, fileid $fileid, sha256 $sha)"
-  done < "$WORK/plan.tsv"
+  local i
+  for i in "${!RES_KEY[@]}"; do
+    cp "$DEPOT/${RES_SHA[$i]}.zip" "$DATA_PATH/Mods/${RES_KEY[$i]}.zip"
+    MODS_KEEP["${RES_KEY[$i]}.zip"]=1
+    log "install: ${RES_KEY[$i]}.zip (modid ${RES_MODID[$i]}, version ${RES_VERSION[$i]}, sha256 ${RES_SHA[$i]})"
+  done
   prune_mods
-  log "applied set:"
-  while IFS=$'\t' read -r key kind value modid version fileid sha; do
-    log "  $key  version $version  modid $modid  fileid $fileid  sha256 $sha"
-  done < "$WORK/plan.tsv"
   log "depot $DEPOT: $(du -sh "$DEPOT" | cut -f1), $(ls -1 "$DEPOT" | wc -l) archive(s)"
 }
-
-
 
 # --- promote (URL pin -> tracked pin) ----------------------------------------
 # A URL pin becomes "<internal modid>: <version>" only when that tracked pin would resolve to exactly
 # the bytes the URL serves; every other URL pin stays one, with the reason logged.
-promote_entry() {
-  local lineno="$1" key="$2" value="$3" ctx fileid json rel rel_fileid rel_modidstr newest
-  ctx="$PINS:$lineno ($key)"
-  fileid="$(url_fileid "$value")"
+
+untrack() { log "untracked: $1: $2; it stays a URL pin"; }  # <ctx> <reason>
+
+promote_entry() {  # <index into the PIN_* arrays>
+  local idx="$1" i ctx fileid json rel rel_fileid rel_modidstr newest other=""
+  ctx="$PINS:${PIN_LINENO[$idx]} (${PIN_KEY[$idx]})"
+  fileid="$(url_fileid "${PIN_VALUE[$idx]}")"
   if [[ -z "$fileid" ]]; then
-    log "untracked: $ctx is not a Mod DB download URL; it stays a URL pin (Renovate never sees it)"
-    return
+    untrack "$ctx" "${PIN_VALUE[$idx]} is not a Mod DB download URL (Renovate never sees it)"
+    return 0
   fi
-  fetch_artifact "$ctx" url "$key" "$value"
+  fetch_artifact "$ctx" url "${PIN_KEY[$idx]}" "${PIN_VALUE[$idx]}"
   if ! json="$(api_mod "$ART_MODID")"; then
-    log "untracked: $ctx: '$ART_MODID' is not on the Mod DB; it stays a URL pin"
-    return
+    untrack "$ctx" "'$ART_MODID' is not on the Mod DB"
+    return 0
   fi
   rel="$(printf '%s' "$json" | jq -c --arg v "$ART_VERSION" \
     '[.mod.releases[] | select(.modversion == $v)] | sort_by(.created) | last // empty')"
   if [[ -z "$rel" || "$rel" == "null" ]]; then
-    log "untracked: $ctx: '$ART_MODID' has no released version '$ART_VERSION'; it stays a URL pin"
-    return
+    untrack "$ctx" "'$ART_MODID' has no released version '$ART_VERSION'"
+    return 0
   fi
   rel_fileid="$(jq -r '.fileid // empty' <<<"$rel")"
   rel_modidstr="$(jq -r '.modidstr // empty' <<<"$rel")"
   if [[ "$rel_fileid" != "$fileid" ]]; then
-    log "untracked: $ctx: upstream re-uploaded $ART_MODID $ART_VERSION as fileid $rel_fileid while the URL pins $fileid; it stays a URL pin"
-    return
+    untrack "$ctx" "upstream re-uploaded $ART_MODID $ART_VERSION as fileid $rel_fileid while the URL pins $fileid"
+    return 0
   fi
   if [[ "$rel_modidstr" != "$ART_MODID" ]]; then
-    log "untracked: $ctx: release '$ART_VERSION' carries internal Mod ID '$rel_modidstr'; it stays a URL pin"
-    return
+    untrack "$ctx" "release '$ART_VERSION' carries internal Mod ID '$rel_modidstr'"
+    return 0
   fi
   if ! printf '%s' "$rel" | jq -e --arg re "$MINOR_RE" 'any(.tags[]?; test($re))' >/dev/null; then
-    log "untracked: $ctx: release '$ART_VERSION' has no tag for $MINOR; it stays a URL pin"
-    return
+    untrack "$ctx" "release '$ART_VERSION' has no tag for $MINOR"
+    return 0
   fi
   newest="$(printf '%s' "$json" | jq -r --arg re "$MINOR_RE" \
     '[.mod.releases[] | select(any(.tags[]?; test($re)))] | sort_by(.created) | last | .modversion // empty')"
   if [[ "$newest" != "$ART_VERSION" ]]; then
-    log "untracked: $ctx: '$ART_VERSION' is older than $newest for $MINOR, so it stays a URL pin on purpose"
-    return
+    untrack "$ctx" "'$ART_VERSION' is older than $newest for $MINOR, so it stays a URL pin on purpose"
+    return 0
   fi
   # Rewriting into a key another line already pins would write a pins file the resolver rejects.
-  if awk -F'\t' -v n="$lineno" -v k="$ART_MODID" '$1 != n && $2 == k { other = 1 } END { exit (other ? 0 : 1) }' \
-    "$WORK/pins.tsv"; then
-    log "untracked: $ctx: '$ART_MODID' is already pinned on another line; it stays a URL pin"
-    return
+  for i in "${!PIN_KEY[@]}"; do
+    if [[ "$i" != "$idx" && "${PIN_KEY[$i]}" == "$ART_MODID" ]]; then other="1"; fi
+  done
+  if [[ -n "$other" ]]; then
+    untrack "$ctx" "'$ART_MODID' is already pinned on another line"
+    return 0
   fi
-  printf '%s\t%s: %s\n' "$lineno" "$ART_MODID" "$ART_VERSION" >> "$WORK/rewrites.tsv"
+  REWRITE["${PIN_LINENO[$idx]}"]="$ART_MODID: $ART_VERSION"
   log "promote: $ctx -> $ART_MODID: $ART_VERSION (fileid $fileid, modidstr $rel_modidstr, sha256 $ART_SHA)"
 }
 
 promote_all() {
-  local lineno key kind value
-  : > "$WORK/rewrites.tsv"
+  local idx n=0 line
+  REWRITE=()
   parse_pins
-  while IFS=$'\t' read -r lineno key kind value; do
-    if [[ "$kind" != url ]]; then continue; fi
-    promote_entry "$lineno" "$key" "$value"
-  done < "$WORK/pins.tsv"
-  if [[ ! -s "$WORK/rewrites.tsv" ]]; then
+  for idx in "${!PIN_KEY[@]}"; do
+    if [[ "${PIN_KIND[$idx]}" == url ]]; then promote_entry "$idx"; fi
+  done
+  if [[ ${#REWRITE[@]} -eq 0 ]]; then
     log "nothing to promote: no URL pin can be tracked byte-for-byte"
     return 0
   fi
-  awk -F'\t' 'NR == FNR { rep[$1] = $2; next } { print ((FNR in rep) ? rep[FNR] : $0) }' \
-    "$WORK/rewrites.tsv" "$PINS" > "$WORK/pins.new"
+  # Rewrites are keyed by line number, so comments, blanks and untouched pins survive verbatim.
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    n=$((n + 1))
+    if [[ -n "${REWRITE[$n]:-}" ]]; then
+      printf '%s\n' "${REWRITE[$n]}"
+    else
+      printf '%s\n' "$line"
+    fi
+  done < "$PINS" > "$WORK/pins.new"
   mv "$WORK/pins.new" "$PINS"
-  log "rewrote $(wc -l < "$WORK/rewrites.tsv") line(s) of $PINS"
+  log "rewrote ${#REWRITE[@]} line(s) of $PINS"
 }
 
 case "$MODE" in
-  --check)
-    resolve_all
-    log "resolved every pin against Vintage Story $VS_VERSION (minor $MINOR)"
-    ;;
-  --stage)
+  --check|--stage)
     resolve_all
     stage_apply
     ;;
