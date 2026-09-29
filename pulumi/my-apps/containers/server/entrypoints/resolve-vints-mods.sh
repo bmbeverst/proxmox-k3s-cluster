@@ -74,11 +74,15 @@ mkdir -p "$DATA_PATH/Mods" "$DEPOT" "$WORK"
 [[ -f "$CATALOG" ]] || echo '{}' > "$CATALOG"
 
 # --- depot + catalog ---------------------------------------------------------
-# catalog.json maps "<key>:<version>:<minor>" and "url:<url>:<minor>" to the sha256 of the archive,
-# plus "fileid:<fileid>:<minor>" so a URL pin promoted to a version pin reuses the depot bytes.
+# catalog.json maps "<key>:<version>:<minor>", "url:<url>:<minor>" and "fileid:<fileid>:<minor>" to
+# the sha256 of the archive. The fileid entry is what lets a promoted URL pin reuse the depot bytes,
+# and a pre-flatten {fileid, filename, sha256} value is still honored so an existing depot is never
+# re-downloaded just because the catalog changed shape.
 
 # The sha256 the catalog records for <key>, or "".
-catalog_sha() { jq -r --arg k "$1" '.[$k] // empty' "$CATALOG"; }
+catalog_sha() {
+  jq -r --arg k "$1" '.[$k] // empty | if type == "string" then . else (.sha256 // empty) end' "$CATALOG"
+}
 
 catalog_put() {  # <key> <sha256>
   jq --arg k "$1" --arg s "$2" '.[$k] = $s' "$CATALOG" > "$WORK/catalog.new"
