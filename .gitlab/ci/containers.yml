@@ -398,10 +398,19 @@ smoke:vints:
       # 8) regression: the console must be usable without a tty. A command written to the
       # FIFO the entrypoint holds open has to be read and handled (a tty client that
       # disconnects used to EOF stdin and mute the console for the rest of the pod's life).
+      # The server only starts reading its console once the game is running, so wait for
+      # RunGame first instead of racing WorldReady.
+      ok=""
+      for i in $(seq 1 30); do
+        podman logs smoke-vints > "$D/boot.log" 2>&1 || true
+        grep -q 'Entering runphase RunGame' "$D/boot.log" && { ok=1; break; }
+        sleep 2
+      done
+      [ -n "$ok" ] || { tail -40 "$D/boot.log"; die "server never reached RunGame"; }
       podman exec smoke-vints timeout 5 /bin/sh -c 'printf "/list clients\n" > /tmp/vints-console.fifo' \
         || die "could not write to the console FIFO"
       ok=""
-      for i in $(seq 1 10); do
+      for i in $(seq 1 20); do
         podman logs smoke-vints > "$D/boot.log" 2>&1 || true
         grep -q 'Handling Console Command /list clients' "$D/boot.log" && { ok=1; break; }
         sleep 1
