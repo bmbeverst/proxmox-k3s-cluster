@@ -7,7 +7,7 @@ tls_san = "10.10.1.99"
 # Must match the init node IP in the inventory
 init_node_ip = "10.10.1.111"
 
-def readVaultToken():
+def readVault():
     file_path = '.vault_pass'
     vault_path = "./group_data/k3s/vault"
     try:
@@ -19,10 +19,19 @@ def readVaultToken():
 
     with open(vault_path) as fp:
         vault_data = vault.load(fp.read())
-     
-    return vault_data.get('k3s_token')
+
+    return vault_data
+
+# Secrets live in the encrypted vault (group_data/k3s/vault), never in plain text here.
+vault_data = readVault()
 
 # Get k3s token from vault
-k3s_token = readVaultToken()
+k3s_token = vault_data.get('k3s_token')
 if not k3s_token:
     raise Exception("k3s_token not found in vault")
+
+# The household WAN address, reported as the node ExternalIP so the Tailscale
+# operator can advertise static endpoints for the vints ingress proxy.
+wan_ip = vault_data.get('wan_ip')
+if not wan_ip:
+    raise Exception("wan_ip not found in vault")

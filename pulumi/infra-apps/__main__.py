@@ -562,3 +562,44 @@ vints_router = CustomResource(
     },
     opts=ResourceOptions(depends_on=[tailscale_operator]),
 )
+
+# Static endpoints for the vints ingress proxy. The operator advertises the
+# node ExternalIP(s) and the proxy Service's NodePort to the tailnet, so a
+# remote player can reach the proxy directly instead of over a DERP relay.
+# No node selector: every node reports the same ExternalIP (node-external-ip in
+# pyinfra/files/k3s_config.yaml), and the edge router has to DNAT
+# <WAN>:VINTS_STATIC_ENDPOINT_PORT/udp to any node — a NodePort is cluster-wide.
+VINTS_STATIC_ENDPOINT_PORT = 31641
+
+vints_static_proxyclass = CustomResource(
+    "vints-static",
+    api_version="tailscale.com/v1alpha1",
+    kind="ProxyClass",
+    metadata={"name": "vints-static"},
+    spec={
+        "staticEndpoints": {
+            "nodePort": {
+                "ports": [{"port": VINTS_STATIC_ENDPOINT_PORT}],
+            },
+        },
+    },
+    opts=ResourceOptions(depends_on=[tailscale_operator]),
+)
+
+# Ingress ProxyGroup: the HA form of the single proxy that tailscale.com/expose
+# creates. Static endpoints are only implemented for ProxyGroup proxies, so the
+# vints HA tailnet Service points here. One replica + one port keeps the edge
+# DNAT rule a single fixed mapping.
+vints_ingress = CustomResource(
+    "vints-ingress",
+    api_version="tailscale.com/v1alpha1",
+    kind="ProxyGroup",
+    metadata={"name": "vints-ingress"},
+    spec={
+        "type": "ingress",
+        "proxyClass": "vints-static",
+        "replicas": 1,
+        "hostnamePrefix": "vints-ingress",
+    },
+    opts=ResourceOptions(depends_on=[vints_static_proxyclass]),
+)

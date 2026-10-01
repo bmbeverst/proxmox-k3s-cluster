@@ -322,6 +322,7 @@ def register(namespace):
             selector={"app": "vints"},
             type="LoadBalancer",
             load_balancer_ip=VINTS_LB_IP,
+            external_traffic_policy="Local",
             ports=[
                 k8s.core.v1.ServicePortArgs(
                     name="game-tcp", port=VINTS_PORT, target_port=VINTS_PORT,
@@ -345,6 +346,33 @@ def register(namespace):
             annotations={
                 "tailscale.com/expose": "true",
                 "tailscale.com/hostname": "vints-vintagestory",
+            },
+        ),
+        spec=k8s.core.v1.ServiceSpecArgs(
+            selector={"app": "vints"},
+            type="ClusterIP",
+            ports=[
+                k8s.core.v1.ServicePortArgs(
+                    name="game-tcp", port=VINTS_PORT, target_port=VINTS_PORT,
+                    protocol="TCP"),
+                k8s.core.v1.ServicePortArgs(
+                    name="game-udp", port=VINTS_PORT, target_port=VINTS_PORT,
+                    protocol="UDP"),
+            ],
+        ),
+        opts=pulumi.ResourceOptions(depends_on=[namespace, vints]),
+    )
+
+
+    vints_tailnet_ha_service = k8s.core.v1.Service(
+        "vints-tailnet-ha",
+        metadata=ObjectMetaArgs(
+            name="vints-tailnet-ha",
+            namespace=NAMESPACE,
+            annotations={
+                "tailscale.com/expose": "true",
+                "tailscale.com/proxy-group": "vints-ingress",
+                "tailscale.com/hostname": "vints-vintagestory-ha",
             },
         ),
         spec=k8s.core.v1.ServiceSpecArgs(

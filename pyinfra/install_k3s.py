@@ -71,13 +71,15 @@ else:
             # _timeout=120, # This can be an issue due to GitHub throttling
         )
 
-k3s_config = files.put(
-    name="Set image-gc-threshold in k3s/config.yaml",
+# Rendered, not copied: node-external-ip comes from the vault's wan_ip.
+k3s_config = files.template(
+    name="Set kublet, disable servicelb, external IP in k3s/config.yaml",
     src="files/k3s_config.yaml",
     dest="/etc/rancher/k3s/config.yaml",
     mode="644",
     user="root",
     group="root",
+    wan_ip=host.data.get("wan_ip"),
     _sudo=True,
 )
 

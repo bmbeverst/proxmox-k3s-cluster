@@ -12,3 +12,6 @@ systemReserved:
 # kube-vip owns LoadBalancer VIPs, so ServiceLB must be off.
 disable:
   - servicelb
+
+node-external-ip:
+  - "{{ wan_ip }}"
