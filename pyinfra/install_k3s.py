@@ -71,7 +71,7 @@ else:
             # _timeout=120, # This can be an issue due to GitHub throttling
         )
 
-# Rendered, not copied: node-external-ip comes from the vault's wan_ip.
+
 k3s_config = files.template(
     name="Set kublet, disable servicelb, external IP in k3s/config.yaml",
     src="files/k3s_config.yaml",
@@ -80,6 +80,7 @@ k3s_config = files.template(
     user="root",
     group="root",
     wan_ip=host.data.get("wan_ip"),
+    advertise_address=host.name,
     _sudo=True,
 )
 
