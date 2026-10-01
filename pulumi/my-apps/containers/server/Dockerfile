@@ -14,6 +14,8 @@ RUN useradd --system --uid 1001 --home-dir /serverfiles --shell /bin/bash vints 
  && chown -R vints:vints /serverfiles
 COPY entrypoints/ /entrypoints/
 RUN chmod +x /entrypoints/*.sh
+# Operator entry point for the server console (see start-vints.sh for the FIFO).
+RUN ln -s /entrypoints/vints-console.sh /usr/local/bin/vints-console
 
 ARG VS_VERSION
 ARG VS_URL

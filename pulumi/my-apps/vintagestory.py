@@ -58,6 +58,8 @@ _vints_dockerconfig = pulumi.Output.all(_vints_registry_user, _vints_registry_to
 VINTS_PREFERRED_NODES = ["node1", "node2"]
 VINTS_PORT = 42420
 VINTS_LB_IP = "10.10.1.91"  # kube-vip LoadBalancer VIP (static)
+# Server console input: the FIFO start-vints.sh keeps open as the server's stdin.
+VINTS_CONSOLE_FIFO = "/tmp/vints-console.fifo"
 VINTS_NFS_SERVER = "10.10.1.101"  # host serving the backup export
 VINTS_NFS_PATH = "/pvebackup"     # export; writable by uid 1001
 
@@ -73,6 +75,8 @@ def _vints_env():
     return [
         {"name": "DATA_PATH", "value": "/data"},
         {"name": "PORT", "value": str(VINTS_PORT)},
+        # start-vints.sh creates this FIFO and reads console commands from it; vints-console writes to it.
+        {"name": "CONSOLE_FIFO", "value": VINTS_CONSOLE_FIFO},
     ]
 
 
@@ -242,9 +246,11 @@ def register(namespace):
                             image_pull_policy="Always",
                             command=["/entrypoints/start-vints.sh"],
                             env=_vints_env(),
-                            # `kubectl attach -it deploy/vints -c vints` server's interactive console.
-                            stdin=True,
-                            tty=True,
+                            # Console: `kubectl exec -it deploy/vints -c vints -- vints-console`
+                            # (interactive) or `... -- vints-console /list clients` (one-shot).
+                            # Deliberately no tty/stdin here: a tty client that disconnects sends EOF,
+                            # which .NET latches and which mutes the server's console reader for the rest
+                            # of the pod's life (start-vints.sh feeds stdin from the FIFO instead).
                             security_context=k8s.core.v1.SecurityContextArgs(
                                 run_as_non_root=True,
                                 allow_privilege_escalation=False,
