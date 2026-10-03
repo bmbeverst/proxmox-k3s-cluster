@@ -2,7 +2,7 @@
 # The comment plus the following YAML value pair provide datasource, depName, and the currentValue.
 
 # renovate: datasource=github-releases depName=rancher/system-upgrade-controller
-suc_version: v0.20.1
+suc_version: v0.20.2
 
 # renovate: datasource=github-releases depName=kube-vip/kube-vip-cloud-provider
 kvcp_version: v0.0.12
