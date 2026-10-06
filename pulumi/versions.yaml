@@ -8,7 +8,7 @@ suc_version: v0.20.2
 kvcp_version: v0.0.13
 
 # renovate: datasource=docker depName=ghost
-ghost_image_tag: 6.57.1-alpine
+ghost_image_tag: 6.67.0-alpine
 
 # renovate: datasource=docker depName=registry.gitlab.com/proxmox-k3s/proxmox-k3s-cluster/vints-server
 vints_server_image_tag: 1.0.40
