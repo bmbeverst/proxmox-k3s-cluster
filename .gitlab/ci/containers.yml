@@ -507,6 +507,9 @@ promote:vints-mods:
       git checkout -q -B "$BRANCH" FETCH_HEAD
       echo "promoting from $CI_DEFAULT_BRANCH at $(git rev-parse HEAD)"
 
+      # The URL lives on the pin line, so keep the pre-promote file for the MR description.
+      before="$(mktemp)"
+      cp "$PINS" "$before"
       out=$(pulumi/my-apps/containers/server/entrypoints/resolve-vints-mods.sh --promote --mods "$PINS")
       echo "$out"
       if git diff --quiet; then
@@ -514,9 +517,22 @@ promote:vints-mods:
         exit 0
       fi
       COUNT=$(grep -c '^\[mods\] promote: ' <<<"$out" || true)
-      # Push options cannot carry newlines, so the MR description is one line: exactly what changed,
-      # with the fileid, sha256 and internal Mod ID proving no bytes moved.
-      REWRITES=$(grep '^\[mods\] promote: ' <<<"$out" | sed 's/^\[mods\] promote: //' | paste -sd'; ' -)
+
+      # One block per promoted mod: the URL pin, then what it became. Push options cannot carry a
+      # multi-line description, so the MR is created through the API instead.
+      DESC_FILE="$(mktemp)"
+      while IFS= read -r line; do
+        rest="${line#*promote: }"
+        ctx="${rest%% -> *}"
+        key="$(tr -d '()' <<< "${ctx##* }")"
+        tail="${rest#* -> }"
+        track="${tail%% (fileid*}"
+        fileid="${tail#*fileid }"; fileid="${fileid%%,*}"
+        url="$(awk -v k="$key" 'index($0, k ":") == 1 { s = substr($0, length(k) + 2); sub(/^[ \t]+/, "", s); sub(/[ \t]+$/, "", s); print s; exit }' "$before")"
+        printf '%s\n    %s (fileid %s)\n' "$url" "$track" "$fileid" >> "$DESC_FILE"
+      done < <(grep '^\[mods\] promote: ' <<<"$out")
+      [[ -s "$DESC_FILE" ]] \
+        || { echo "FATAL: could not build an MR description from $COUNT promote line(s)"; exit 1; }
 
       # Commit as the token's own user (a project access token's bot user), never as a human.
       IDENT=$(curl -fsS -H "PRIVATE-TOKEN: $RENOVATE_TOKEN" "$CI_API_V4_URL/user")
@@ -529,13 +545,31 @@ promote:vints-mods:
       git -c user.name="$GIT_NAME" -c user.email="$GIT_EMAIL" \
         commit -m "chore: track $COUNT vints mod pin(s)" "$PINS"
       git push \
-        -o merge_request.create \
-        -o merge_request.target="$CI_DEFAULT_BRANCH" \
-        -o merge_request.merge_when_pipeline_succeeds \
-        -o merge_request.remove_source_branch \
-        -o merge_request.title="chore: promote vints mod URL pins" \
-        -o merge_request.description="$REWRITES" \
         "https://oauth2:$RENOVATE_TOKEN@$CI_SERVER_HOST/$CI_PROJECT_PATH.git" \
         "HEAD:refs/heads/$BRANCH"
-      echo "opened an MR from $BRANCH: $REWRITES"
+
+      # Close and delete every older promote MR/branch first, so the new one supersedes them instead
+      # of piling up (a stale MR is born behind main and can never fast-forward anyway).
+      while read -r iid old_branch; do
+        curl -fsS -o /dev/null -X PUT -H "PRIVATE-TOKEN: $RENOVATE_TOKEN" \
+          "$CI_API_V4_URL/projects/$CI_PROJECT_ID/merge_requests/$iid" \
+          --data-urlencode "state_event=close"
+        curl -fsS -o /dev/null -X DELETE -H "PRIVATE-TOKEN: $RENOVATE_TOKEN" \
+          "$CI_API_V4_URL/projects/$CI_PROJECT_ID/repository/branches/$(jq -rn --arg b "$old_branch" '$b|@uri')" || true
+        echo "closed stale promote MR !$iid ($old_branch)"
+      done < <(curl -fsS -H "PRIVATE-TOKEN: $RENOVATE_TOKEN" \
+                 "$CI_API_V4_URL/projects/$CI_PROJECT_ID/merge_requests?state=opened&per_page=100" \
+                 | jq -r --arg b "$BRANCH" \
+                     '.[] | select(.source_branch | startswith("mods/promote-url-pins-"))
+                          | select(.source_branch != $b) | "\(.iid) \(.source_branch)"')
+
+      RESP="$(curl -fsS -X POST -H "PRIVATE-TOKEN: $RENOVATE_TOKEN" \
+        "$CI_API_V4_URL/projects/$CI_PROJECT_ID/merge_requests" \
+        --data-urlencode "source_branch=$BRANCH" \
+        --data-urlencode "target_branch=$CI_DEFAULT_BRANCH" \
+        --data-urlencode "title=chore: promote vints mod URL pins" \
+        --data-urlencode "description@$DESC_FILE" \
+        --data-urlencode "remove_source_branch=true" \
+        --data-urlencode "merge_when_pipeline_succeeds=true")"
+      echo "opened MR !$(jq -r '.iid' <<<"$RESP"): $(jq -r '.web_url' <<<"$RESP")"
 
