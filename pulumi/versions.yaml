@@ -5,7 +5,7 @@
 suc_version: v0.20.2
 
 # renovate: datasource=github-releases depName=kube-vip/kube-vip-cloud-provider
-kvcp_version: v0.0.12
+kvcp_version: v0.0.13
 
 # renovate: datasource=docker depName=ghost
 ghost_image_tag: 6.57.1-alpine
