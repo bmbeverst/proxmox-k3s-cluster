@@ -29,9 +29,3 @@ vault_data = readVault()
 k3s_token = vault_data.get('k3s_token')
 if not k3s_token:
     raise Exception("k3s_token not found in vault")
-
-# The household WAN address, reported as the node ExternalIP so the Tailscale
-# operator can advertise static endpoints for the vints ingress proxy.
-wan_ip = vault_data.get('wan_ip')
-if not wan_ip:
-    raise Exception("wan_ip not found in vault")

@@ -335,61 +335,6 @@ def register(namespace):
         opts=pulumi.ResourceOptions(depends_on=[namespace, vints]),
     )
 
-    # Tailnet access via the Tailscale operator: ClusterIP + expose annotation, so
-    # kube-vip and its IP pool are uninvolved. L3 ingress carries TCP and UDP.
-    # Players reach it as vints-vintagestory.<tailnet>.ts.net (port 42420).
-    vints_tailnet_service = k8s.core.v1.Service(
-        "vints-tailnet",
-        metadata=ObjectMetaArgs(
-            name="vints-tailnet",
-            namespace=NAMESPACE,
-            annotations={
-                "tailscale.com/expose": "true",
-                "tailscale.com/hostname": "vints-vintagestory",
-            },
-        ),
-        spec=k8s.core.v1.ServiceSpecArgs(
-            selector={"app": "vints"},
-            type="ClusterIP",
-            ports=[
-                k8s.core.v1.ServicePortArgs(
-                    name="game-tcp", port=VINTS_PORT, target_port=VINTS_PORT,
-                    protocol="TCP"),
-                k8s.core.v1.ServicePortArgs(
-                    name="game-udp", port=VINTS_PORT, target_port=VINTS_PORT,
-                    protocol="UDP"),
-            ],
-        ),
-        opts=pulumi.ResourceOptions(depends_on=[namespace, vints]),
-    )
-
-
-    vints_tailnet_ha_service = k8s.core.v1.Service(
-        "vints-tailnet-ha",
-        metadata=ObjectMetaArgs(
-            name="vints-tailnet-ha",
-            namespace=NAMESPACE,
-            annotations={
-                "tailscale.com/expose": "true",
-                "tailscale.com/proxy-group": "vints-ingress",
-                "tailscale.com/hostname": "vints-vintagestory-ha",
-            },
-        ),
-        spec=k8s.core.v1.ServiceSpecArgs(
-            selector={"app": "vints"},
-            type="ClusterIP",
-            ports=[
-                k8s.core.v1.ServicePortArgs(
-                    name="game-tcp", port=VINTS_PORT, target_port=VINTS_PORT,
-                    protocol="TCP"),
-                k8s.core.v1.ServicePortArgs(
-                    name="game-udp", port=VINTS_PORT, target_port=VINTS_PORT,
-                    protocol="UDP"),
-            ],
-        ),
-        opts=pulumi.ResourceOptions(depends_on=[namespace, vints]),
-    )
-
     # The backup job stops the server, so it may scale this Deployment and watch its pods.
     vints_backup_sa = k8s.core.v1.ServiceAccount(
         "vints-backup",

@@ -13,7 +13,4 @@ systemReserved:
 disable:
   - servicelb
 
-node-external-ip:
-  - "{{ wan_ip }}"
-
 advertise-address: "{{ advertise_address }}"

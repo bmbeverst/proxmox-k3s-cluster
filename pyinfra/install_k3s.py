@@ -73,13 +73,12 @@ else:
 
 
 k3s_config = files.template(
-    name="Set kublet, disable servicelb, external IP in k3s/config.yaml",
+    name="Set kublet, disable servicelb in k3s/config.yaml",
     src="files/k3s_config.yaml",
     dest="/etc/rancher/k3s/config.yaml",
     mode="644",
     user="root",
     group="root",
-    wan_ip=host.data.get("wan_ip"),
     advertise_address=host.name,
     _sudo=True,
 )

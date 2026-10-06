@@ -548,58 +548,18 @@ tailscale_operator = k8s.helm.v3.Release(
     ),
 )
 
-# Connector: subnet router advertising only the vints kube-vip VIP to the tailnet.
-# Connectors are cluster-scoped, so metadata carries no namespace.
-vints_router = CustomResource(
-    "vints-router",
+
+# Subnet router: advertises the cluster subnet to the tailnet so tagged devices reach
+# 10.10.1.x (kube-vip VIP + nodes). The route must be approved in the tailnet policy.
+subnet_router = CustomResource(
+    "subnet-router",
     api_version="tailscale.com/v1alpha1",
     kind="Connector",
-    metadata={"name": "vints-router"},
+    metadata={"name": "subnet-router"},
     spec={
         "replicas": 1,
-        "hostnamePrefix": "vints-router",
-        "subnetRouter": {"advertiseRoutes": ["10.10.1.91/32"]},
+        "hostnamePrefix": "subnet-router",
+        "subnetRouter": {"advertiseRoutes": ["10.10.1.0/24"]},
     },
     opts=ResourceOptions(depends_on=[tailscale_operator]),
-)
-
-# Static endpoints for the vints ingress proxy. The operator advertises the
-# node ExternalIP(s) and the proxy Service's NodePort to the tailnet, so a
-# remote player can reach the proxy directly instead of over a DERP relay.
-# No node selector: every node reports the same ExternalIP (node-external-ip in
-# pyinfra/files/k3s_config.yaml), and the edge router has to DNAT
-# <WAN>:VINTS_STATIC_ENDPOINT_PORT/udp to any node — a NodePort is cluster-wide.
-VINTS_STATIC_ENDPOINT_PORT = 31641
-
-vints_static_proxyclass = CustomResource(
-    "vints-static",
-    api_version="tailscale.com/v1alpha1",
-    kind="ProxyClass",
-    metadata={"name": "vints-static"},
-    spec={
-        "staticEndpoints": {
-            "nodePort": {
-                "ports": [{"port": VINTS_STATIC_ENDPOINT_PORT}],
-            },
-        },
-    },
-    opts=ResourceOptions(depends_on=[tailscale_operator]),
-)
-
-# Ingress ProxyGroup: the HA form of the single proxy that tailscale.com/expose
-# creates. Static endpoints are only implemented for ProxyGroup proxies, so the
-# vints HA tailnet Service points here. One replica + one port keeps the edge
-# DNAT rule a single fixed mapping.
-vints_ingress = CustomResource(
-    "vints-ingress",
-    api_version="tailscale.com/v1alpha1",
-    kind="ProxyGroup",
-    metadata={"name": "vints-ingress"},
-    spec={
-        "type": "ingress",
-        "proxyClass": "vints-static",
-        "replicas": 1,
-        "hostnamePrefix": "vints-ingress",
-    },
-    opts=ResourceOptions(depends_on=[vints_static_proxyclass]),
 )
