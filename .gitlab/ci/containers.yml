@@ -514,19 +514,28 @@ promote:vints-mods:
       echo "$out"
       COUNT=$(grep -c '^\[mods\] promote: ' <<<"$out" || true)
 
-      # Older promote MRs/branches are superseded whether or not this run has work: close and delete.
-      while read -r iid old_branch; do
+      # Older promote artifacts are superseded whether or not this run has work: close the MRs (no
+      # pings) and delete the branches, including ones whose MR was already closed by hand.
+      while read -r iid; do
         curl -fsS -o /dev/null -X PUT -H "PRIVATE-TOKEN: $RENOVATE_TOKEN" \
           "$CI_API_V4_URL/projects/$CI_PROJECT_ID/merge_requests/$iid" \
           --data-urlencode "state_event=close"
-        curl -fsS -o /dev/null -X DELETE -H "PRIVATE-TOKEN: $RENOVATE_TOKEN" \
-          "$CI_API_V4_URL/projects/$CI_PROJECT_ID/repository/branches/$(jq -rn --arg b "$old_branch" '$b|@uri')" || true
-        echo "closed stale promote MR !$iid ($old_branch)"
+        echo "closed stale promote MR !$iid"
       done < <(curl -fsS -H "PRIVATE-TOKEN: $RENOVATE_TOKEN" \
                  "$CI_API_V4_URL/projects/$CI_PROJECT_ID/merge_requests?state=opened&per_page=100" \
                  | jq -r --arg b "$BRANCH" \
                      '.[] | select(.source_branch | startswith("mods/promote-url-pins-"))
-                          | select(.source_branch != $b) | "\(.iid) \(.source_branch)"')
+                          | select(.source_branch != $b) | .iid')
+      while read -r br; do
+        if [[ "$br" == "$BRANCH" ]]; then continue; fi
+        curl -fsS -o /dev/null -X DELETE -H "PRIVATE-TOKEN: $RENOVATE_TOKEN" \
+          "$CI_API_V4_URL/projects/$CI_PROJECT_ID/repository/branches/$(jq -rn --arg b "$br" '$b|@uri')" || true
+        echo "deleted stale promote branch $br"
+      done < <(curl -fsS -G -H "PRIVATE-TOKEN: $RENOVATE_TOKEN" \
+                 --data-urlencode "search=mods/promote-url-pins" \
+                 --data-urlencode "per_page=100" \
+                 "$CI_API_V4_URL/projects/$CI_PROJECT_ID/repository/branches" \
+                 | jq -r '.[].name')
 
       if git diff --quiet; then
         echo "no URL pin can be tracked byte-for-byte: nothing to do"
