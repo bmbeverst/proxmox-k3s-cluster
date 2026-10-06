@@ -481,6 +481,11 @@ smoke:vints-backup:
 promote:vints-mods:
   stage: maintenance
   image: quay.io/containers/podman:v5.8.7-immutable
+  # The scheduled renovate job in this pipeline lands its own auto-merges in main minutes after it
+  # exits, and main only takes fast-forward merges: wait for it before cutting the promote branch.
+  needs:
+    - job: renovate
+      optional: true
   rules:
     - if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
       changes:
@@ -498,6 +503,25 @@ promote:vints-mods:
         pulumi/my-apps/containers/server/vintagestory-version.yaml)
       export VS_VERSION
       BRANCH="mods/promote-url-pins-$(date -u +%Y%m%dT%H%M%SZ)"
+
+      # Branch off main's current tip, not this pipeline's checkout: a promote branch that starts
+      # behind main can never merge, and the tip is only settled once it stops moving.
+      tip="$(git rev-parse HEAD)"
+      quiet=""
+      for _ in {1..20}; do
+        git fetch -q origin "$CI_DEFAULT_BRANCH"
+        cur="$(git rev-parse FETCH_HEAD)"
+        if [[ "$cur" != "$tip" ]]; then
+          quiet=""
+          tip="$cur"
+        else
+          quiet+="."                         # 5 quiet polls (~60s): nothing is still landing on main
+          if [[ ${#quiet} -ge 5 ]]; then break; fi
+        fi
+        sleep 15
+      done
+      git checkout -q -B "$BRANCH" FETCH_HEAD
+      echo "promoting from $CI_DEFAULT_BRANCH at $tip"
 
       out=$(pulumi/my-apps/containers/server/entrypoints/resolve-vints-mods.sh --promote --mods "$PINS")
       echo "$out"
