@@ -50,5 +50,6 @@ renovate:
     DOCKER_REGISTRY_GITLAB_COM_PASSWORD: $CI_JOB_TOKEN
   script:
     - renovate
-  only:
-    - schedules
+  rules:
+    # One schedule for renovate; mods-promote has its own (see .gitlab/ci/containers.yml).
+    - if: $CI_PIPELINE_SOURCE == "schedule" && $RUN_KIND != "promote"
