@@ -16,6 +16,18 @@
       "automerge": false
     },
     {
+      "description": "One MR for everything except Helm chart bumps and the versions.yaml deploy pins (those stay one-at-a-time)",
+      "matchManagers": [
+        "!helmv3"
+      ],
+      "matchFileNames": [
+        "!pulumi/Chart.yaml",
+        "!pulumi/versions.yaml"
+      ],
+      "groupName": "all dependencies",
+      "groupSlug": "all-deps"
+    },
+    {
       "description": "Ghost image: keep the -alpine suffix",
       "matchDatasources": [
         "docker"
