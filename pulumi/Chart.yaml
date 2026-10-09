@@ -26,7 +26,7 @@ dependencies:
     version: 8.6.0
   - name: pulumi-kubernetes-operator
     repository: oci://ghcr.io/pulumi/helm-charts
-    version: 2.9.1
+    version: 2.9.2
   - name: tailscale-operator
     repository: https://pkgs.tailscale.com/helmcharts
     version: 1.102.4
