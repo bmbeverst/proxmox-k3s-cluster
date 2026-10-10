@@ -12,25 +12,43 @@ stages:
   - smoke # boot the built images and assert they actually start
   - maintenance
 
-# Only include the security scan templates in non-scheduled pipelines. This is
-# decided at config time by $CI_PIPELINE_SOURCE, which is set by GitLab itself
-# (only the scheduler produces "schedule" pipelines). We deliberately do NOT
-# use SAST_DISABLED / SECRET_DETECTION_DISABLED variables: pipeline variables
-# (Run pipeline form, `git push -o ci.variable=...`) take highest precedence
-# and would let anyone skip the scans on demand.
+# Security scans are gated with job `rules:` (config-time), not
+# SAST_DISABLED / SECRET_DETECTION_DISABLED: those are pipeline variables
+# (Run pipeline form, `git push -o ci.variable=...`) which take highest
+# precedence and would let anyone skip the scans on demand.
 include:
   - template: Security/SAST.gitlab-ci.yml
-    rules:
-      - if: $CI_PIPELINE_SOURCE != "schedule"
   - template: Security/Secret-Detection.gitlab-ci.yml
-    rules:
-      - if: $CI_PIPELINE_SOURCE != "schedule"
   - template: Security/Container-Scanning.gitlab-ci.yml
   # Container build + scan jobs live here to keep the root pipeline lean.
   - local: .gitlab/ci/containers.yml
 
 variables:
   SECRET_DETECTION_ENABLED: "true"
+
+# SAST runs only on the "weekly SAST" pipeline schedule, never on a push.
+semgrep-sast:
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule" && $CI_PIPELINE_SCHEDULE_DESCRIPTION == "weekly SAST"
+    - when: never
+
+# Secret detection runs on pushes to the default branch only; renovate branches skip it.
+secret_detection:
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - when: never
+
+# Renovate branches only bump a version line, so no other job's rules match and
+# GitLab persists no pipeline at all - which makes the MR unmergeable (auto-merge
+# needs a successful pipeline) and stalls the Pulumi deploys. This always-present
+# job keeps a successful pipeline on renovate branches.
+keepalive:renovate:
+  stage: test
+  image: alpine:3.22
+  script:
+    - echo "renovate branch: nothing to build"
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH =~ /^renovate\//
 
 # Automatically update dependencies via Renovate
 renovate:
@@ -44,12 +62,21 @@ renovate:
     RENOVATE_REPOSITORIES: $CI_PROJECT_PATH
     # Install python + uv at runtime so pep621 can refresh uv.lock.
     RENOVATE_BINARY_SOURCE: "install"
+    # Keep the runtime tool installs (python, uv) and the repo cache between runs.
+    RENOVATE_BASE_DIR: "$CI_PROJECT_DIR/renovate"
+    RENOVATE_CONTAINERBASE_DIR: "$CI_PROJECT_DIR/renovate/cache/containerbase"
     # Container registry auth for docker datasource (detectHostRulesFromEnv)
     RENOVATE_DETECT_HOST_RULES_FROM_ENV: "true"
     DOCKER_REGISTRY_GITLAB_COM_USERNAME: "gitlab-ci-token"
     DOCKER_REGISTRY_GITLAB_COM_PASSWORD: $CI_JOB_TOKEN
+  cache:
+    # Repo cache plus the containerbase tool cache live under one key.
+    key: renovate
+    paths:
+      - renovate/cache/
   script:
     - renovate
   rules:
-    # One schedule for renovate; mods-promote has its own (see .gitlab/ci/containers.yml).
-    - if: $CI_PIPELINE_SOURCE == "schedule" && $RUN_KIND != "promote"
+    # Runs on the "renovate 3x week" schedule: any schedule that is not the
+    # promote run and not the weekly SAST run.
+    - if: $CI_PIPELINE_SOURCE == "schedule" && $RUN_KIND != "promote" && $CI_PIPELINE_SCHEDULE_DESCRIPTION != "weekly SAST"
