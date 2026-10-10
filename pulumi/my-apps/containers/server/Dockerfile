@@ -17,6 +17,9 @@ RUN chmod +x /entrypoints/*.sh
 # Operator entry point for the server console (see start-vints.sh for the FIFO).
 RUN ln -s /entrypoints/vints-console.sh /usr/local/bin/vints-console
 
+# Every file this RUN creates would otherwise carry the build's wall-clock time as mtime, which re-diffs
+# this whole game layer on every build: a fresh ~50 MB blob per tag, and the old ones are never freed.
+# Pin the mtimes so identical inputs give an identical layer (the build fails below if pinning is lost).
 ARG VS_VERSION
 ARG VS_URL
 ARG VS_MD5
@@ -32,12 +35,18 @@ RUN set -eux; \
     chmod +x /serverfiles/VintagestoryServer; \
     ver="$(cd /serverfiles && ./VintagestoryServer --version 2>/dev/null | tr -d '[:space:]')"; \
     test "$ver" = "$VS_VERSION"; \
-    chown -R vints:vints /serverfiles
+    chown -R vints:vints /serverfiles; \
+    find /serverfiles -exec touch -h -d @0 {} +; \
+    touch -h -d @0 /tmp; \
+    drift="$(find /serverfiles -newermt @1 -print -quit)"; \
+    test -z "$drift" || { echo "FATAL: $drift still carries a build-time mtime, so this layer re-diffs every build" >&2; exit 1; }
 
 # What the tag promises: the game version baked in and the checksum it was built from.
+# layer-mtimes is the marker the smoke job uses to assert pinning end to end.
 LABEL org.opencontainers.image.version="${VS_VERSION}" \
       org.opencontainers.image.source="https://gitlab.com/proxmox-k3s/proxmox-k3s-cluster" \
-      com.proxmox-k3s.vintagestory.md5="${VS_MD5}"
+      com.proxmox-k3s.vintagestory.md5="${VS_MD5}" \
+      com.proxmox-k3s.layer-mtimes="pinned"
 
 USER 1001
 WORKDIR /serverfiles

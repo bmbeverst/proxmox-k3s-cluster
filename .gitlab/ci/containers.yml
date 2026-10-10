@@ -76,7 +76,9 @@ build:vints:
 
       echo "Building $REPO:$FULL_TAG (track ${MAJOR}.${MINOR}) baking Vintage Story $VS_VERSION"
       echo "  artifact $VS_URL (md5 $VS_MD5)"
-      buildah build --storage-driver=vfs --isolation=chroot \
+      # --layers keeps base/apt/game separate so the registry dedupes everything unchanged instead of
+      # storing a fresh squashed blob per tag (see the Dockerfile's mtime pinning).
+      buildah build --layers --storage-driver=vfs --isolation=chroot \
         --build-arg "VS_VERSION=$VS_VERSION" \
         --build-arg "VS_URL=$VS_URL" \
         --build-arg "VS_MD5=$VS_MD5" \
@@ -132,7 +134,8 @@ build:vints-backup:
       FULL_TAG="${MAJOR}.${MINOR}.$(( ${MAX_PATCH:-0} + 1 ))"
 
       echo "Building $REPO:$FULL_TAG (track ${MAJOR}.${MINOR})"
-      buildah build --storage-driver=vfs --isolation=chroot \
+      # --layers so the pin/kubectl/script layers dedupe in the registry instead of one squashed blob per tag.
+      buildah build --layers --storage-driver=vfs --isolation=chroot \
         --tag "$REPO:$FULL_TAG" \
         --tag "$REPO:latest" \
         pulumi/my-apps/containers/backup
@@ -304,6 +307,17 @@ smoke:vints:
         *"$VS_VERSION"*) echo "baked game version OK: $baked" ;;
         *) die "image reports game version '$baked', pinned '$VS_VERSION'" ;;
       esac
+
+      # 1b) the marker an image only earns by pinning its layer mtimes; without that pinning every rebuild
+      # re-uploads the game layer, which is what bloated the registry. Skipped for pre-fix images on purpose:
+      # a branch pull of :latest is always the last published image, not this branch's build.
+      if [ "$(podman image inspect --format '{{index .Config.Labels "com.proxmox-k3s.layer-mtimes"}}' \
+        "$IMG")" = "pinned" ]; then
+        drift=$(podman run --rm "$IMG" find /serverfiles -newermt @1 -print -quit 2>/dev/null || true)
+        [ -z "$drift" ] \
+          || die "$drift carries a build-time mtime, so every rebuild re-uploads the whole game layer"
+        echo "layer mtimes pinned OK"
+      fi
 
       # 2) leftovers of the old installer: a stray zip and a legacy .url stamp must be pruned
       printf 'junk' > "$D/data/Mods/junk.zip"
