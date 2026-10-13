@@ -16,7 +16,7 @@ import yaml
 
 import pulumi
 import pulumi_kubernetes as k8s
-import pulumi_kubernetes.rbac as k8s_rbac  # cluster-admin binding, for in-cluster `pulumi preview`
+import pulumi_kubernetes.rbac as k8s_rbac  # read-only ClusterRole for in-cluster `pulumi preview`
 from pulumi_kubernetes.meta.v1 import ObjectMetaArgs
 
 with open(os.path.join(os.path.dirname(__file__), "..", "versions.yaml")) as f:
@@ -164,23 +164,32 @@ def register(namespace):
         opts=pulumi.ResourceOptions(depends_on=[namespace]),
     )
 
-    # The panel's `pulumi preview` reads the cluster through the pod's SA, so this one is cluster-admin
-    # (no kubeconfig Secret involved). Narrowing it to a read-only role is the recorded alternative.
     paseo_sa = k8s.core.v1.ServiceAccount(
         "paseo",
         metadata=ObjectMetaArgs(name="paseo", namespace=NAMESPACE),
         opts=pulumi.ResourceOptions(depends_on=[namespace]),
     )
 
-    paseo_admin = k8s_rbac.v1.ClusterRoleBinding(
+    # Read-only ClusterRole: panel previews, and no apply path from this shell pod.
+    paseo_read = k8s_rbac.v1.ClusterRole(
+        "paseo-read",
+        metadata=ObjectMetaArgs(name="paseo-read"),
+        rules=[
+            k8s_rbac.v1.PolicyRuleArgs(
+                api_groups=["*"], resources=["*"], verbs=["get", "list", "watch"]),
+        ],
+        opts=pulumi.ResourceOptions(depends_on=[namespace]),
+    )
+
+    paseo_read_binding = k8s_rbac.v1.ClusterRoleBinding(
         "paseo",
         metadata=ObjectMetaArgs(name="paseo"),
         role_ref=k8s_rbac.v1.RoleRefArgs(
-            api_group="rbac.authorization.k8s.io", kind="ClusterRole", name="cluster-admin"),
+            api_group="rbac.authorization.k8s.io", kind="ClusterRole", name="paseo-read"),
         subjects=[
             k8s_rbac.v1.SubjectArgs(kind="ServiceAccount", name="paseo", namespace=NAMESPACE),
         ],
-        opts=pulumi.ResourceOptions(depends_on=[paseo_sa]),
+        opts=pulumi.ResourceOptions(depends_on=[paseo_sa, paseo_read]),
     )
 
     paseo = k8s.apps.v1.Deployment(
