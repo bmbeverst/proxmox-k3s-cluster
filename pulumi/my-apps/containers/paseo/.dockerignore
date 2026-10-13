@@ -1,0 +1,14 @@
+# Allowlist: new files excluded by default, so a stray COPY cannot grab a secret.
+*
+!Dockerfile
+!entrypoint.sh
+!plugins/
+!plugins/**
+
+# Later patterns win over the allowlist above.
+**/node_modules
+**/.env*
+**/*.pem
+**/*.key
+**/*seed*
+**/secrets*

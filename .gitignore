@@ -8,3 +8,5 @@ vault
 # Transient CI artifacts of bake:vints-mods: staged in the repo root, never committed
 .ci-bundle/
 .ci-depot/
+# Vendored plugin deps install inside the image build only
+pulumi/my-apps/containers/paseo/plugins/*/node_modules/

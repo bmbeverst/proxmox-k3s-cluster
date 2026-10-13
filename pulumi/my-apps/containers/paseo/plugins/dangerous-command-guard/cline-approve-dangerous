@@ -1,0 +1,116 @@
+#!/usr/bin/env python3
+"""cline-approve-dangerous - grant Cline a one-shot (or time-boxed) approval for
+a command guarded by the dangerous-command-guard plugin.
+
+Usage (run this YOURSELF in a real terminal):
+    cline-approve-dangerous git-push --once
+    cline-approve-dangerous pulumi-up --for 10m
+    cline-approve-dangerous pyinfra --once
+    cline-approve-dangerous kubectl-edit --once
+    cline-approve-dangerous --list
+    cline-approve-dangerous --clear
+
+It refuses to run without a TTY, so an agent with a shell tool cannot grant
+itself approval.
+"""
+import argparse
+import json
+import os
+import re
+import sys
+import time
+from pathlib import Path
+
+GUARDED = ("git-push", "pulumi-up", "pyinfra", "kubectl-edit")
+GRANTS = Path(os.environ.get("CLINE_GUARD_GRANTS", Path.home() / ".cline" / "approvals" / "dangerous-commands.json"))
+DURATION = re.compile(r"^(\d+)([smhd])$")
+UNITS = {"s": 1, "m": 60, "h": 3600, "d": 86400}
+
+
+def load() -> dict:
+    try:
+        data = json.loads(GRANTS.read_text("utf8"))
+    except FileNotFoundError:
+        return {}
+    except (OSError, ValueError) as error:
+        sys.exit(f"error: cannot read {GRANTS}: {error}")
+    return data if isinstance(data, dict) else {}
+
+
+def save(data: dict) -> None:
+    GRANTS.parent.mkdir(parents=True, exist_ok=True)
+    GRANTS.write_text(json.dumps(data, indent=2) + "\n", "utf8")
+    os.chmod(GRANTS, 0o600)
+
+
+def describe(entry: dict) -> str:
+    remaining = entry.get("remaining")
+    expires = entry.get("expiresAt")
+    parts = []
+    if isinstance(remaining, int):
+        parts.append(f"{remaining} use(s) left")
+    else:
+        parts.append("unlimited uses")
+    if isinstance(expires, (int, float)):
+        left = expires / 1000 - time.time()
+        if left > 0:
+            parts.append(f"expires in {int(left)}s")
+        else:
+            parts.append("EXPIRED")
+    return ", ".join(parts)
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(prog="cline-approve-dangerous", description=__doc__)
+    parser.add_argument("guard", nargs="?", choices=GUARDED, help="which guard to approve")
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument("--once", action="store_true", help="approve the next matching command only (default)")
+    group.add_argument("--for", metavar="DURATION", dest="duration", help="approve for a while, e.g. 10m, 1h, 30s")
+    group.add_argument("--list", action="store_true", help="show current grants")
+    group.add_argument("--clear", action="store_true", help="remove all grants")
+    args = parser.parse_args()
+
+    if args.list:
+        data = load()
+        if not data:
+            print("no grants")
+            return 0
+        for name, entry in data.items():
+            print(f"{name}: {describe(entry) if isinstance(entry, dict) else entry}")
+        return 0
+
+    if args.clear:
+        if GRANTS.exists():
+            GRANTS.unlink()
+        print("all grants cleared")
+        return 0
+
+    if not args.guard:
+        parser.error("specify a guard (%s) or use --list/--clear" % ", ".join(GUARDED))
+
+    if not sys.stdin.isatty():
+        sys.exit(
+            "refusing to grant approval from a non-interactive session.\n"
+            "Run this yourself in your own terminal, not from inside an agent."
+        )
+
+    data = load()
+    entry: dict = {}
+    if args.duration:
+        match = DURATION.match(args.duration)
+        if not match:
+            parser.error("--for expects values like 30s, 10m, 2h, 1d")
+        seconds = int(match.group(1)) * UNITS[match.group(2)]
+        entry["expiresAt"] = int((time.time() + seconds) * 1000)
+    else:
+        entry["remaining"] = 1
+    data[args.guard] = entry
+    save(data)
+    print(f"granted: {args.guard} ({describe(entry)})")
+    print(f"file: {GRANTS}")
+    print("Tell Cline it may retry the command now.")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

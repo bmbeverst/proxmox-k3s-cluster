@@ -1,0 +1,17 @@
+{
+  "name": "dangerous-command-guard",
+  "version": "1.3.0",
+  "private": true,
+  "description": "Cline plugin: require explicit approval before git push / pulumi up / pyinfra / editing kubectl",
+  "type": "module",
+  "main": "index.js",
+  "cline": {
+    "plugins": [
+      {
+        "paths": [
+          "index.js"
+        ]
+      }
+    ]
+  }
+}

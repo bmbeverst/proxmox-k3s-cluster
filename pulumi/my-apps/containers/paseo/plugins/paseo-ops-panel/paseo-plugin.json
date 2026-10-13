@@ -1,0 +1,9 @@
+{
+  "id": "paseo-ops-panel",
+  "name": "Repo Ops",
+  "description": "Workspace panel to run dangerous-command-guard approvals and common repo commands.",
+  "media": [],
+  "requirements": {
+    "paseo": ">=0.11.2"
+  }
+}
