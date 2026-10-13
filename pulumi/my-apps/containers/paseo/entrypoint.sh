@@ -6,7 +6,7 @@ export HOME="${HOME:-/home/paseo}"
 export PASEO_HOME="${PASEO_HOME:-${HOME}/.paseo}"
 export CLINE_CONFIG_DIR="${CLINE_CONFIG_DIR:-${HOME}/.cline}"
 
-SEED="${CLINE_PROVIDERS_SEED:-/run/secrets/cline-providers.json}"
+SEED="${CLINE_PROVIDERS_SEED:-/etc/paseo-secrets/cline-providers.json}"
 GUARD_DIR="${CLINE_GUARD_DIR:-/opt/dangerous-command-guard}"
 PANEL_DIR="${OPS_PANEL_DIR:-/opt/paseo-ops-panel}"
 

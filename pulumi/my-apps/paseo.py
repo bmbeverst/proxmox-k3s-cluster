@@ -38,7 +38,8 @@ PASEO_WORKSPACE = "/workspace"
 PASEO_HOME_DIR = "/home/paseo"
 
 # The image's entrypoint copies this file into ~/.cline/data/settings/providers.json (fatal if absent).
-PASEO_CLINE_SEED_PATH = "/run/secrets/cline-providers.json"
+# Not under /run/secrets: the kubelet mounts its SA token there read-only.
+PASEO_CLINE_SEED_PATH = "/etc/paseo-secrets/cline-providers.json"
 
 # uid/gid the image runs as (`paseo`); the init container hands the volumes over.
 PASEO_UID = 1000
@@ -266,6 +267,7 @@ def register(namespace):
                                 # The ops panel resolves the guard binary at plugin load.
                                 {"name": "CLINE_GUARD_BIN",
                                  "value": "/opt/dangerous-command-guard/cline-approve-dangerous"},
+                                {"name": "CLINE_PROVIDERS_SEED", "value": PASEO_CLINE_SEED_PATH},
                                 {"name": "GIT_AUTHOR_NAME", "value": "paseo"},
                                 {"name": "GIT_AUTHOR_EMAIL", "value": "paseo@localhost"},
                                 *_paseo_git_env(_paseo_git_token),
@@ -312,7 +314,7 @@ def register(namespace):
                                 k8s.core.v1.VolumeMountArgs(
                                     name="paseo-workspace", mount_path=PASEO_WORKSPACE),
                                 k8s.core.v1.VolumeMountArgs(
-                                    name="cline-seed", mount_path="/run/secrets", read_only=True),
+                                    name="cline-seed", mount_path="/etc/paseo-secrets", read_only=True),
                             ],
                         ),
                     ],
