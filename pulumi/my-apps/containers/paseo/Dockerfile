@@ -3,8 +3,11 @@ ARG PASEO_BASE_TAG=0.11.2
 FROM ghcr.io/getpaseo/paseo:${PASEO_BASE_TAG}
 
 USER root
+# renovate: datasource=npm depName=cline
 ARG CLINE_VERSION=3.0.61
+# renovate: datasource=github-releases depName=pulumi/pulumi
 ARG PULUMI_VERSION=3.261.0
+# renovate: datasource=github-releases depName=astral-sh/uv
 ARG UV_VERSION=0.13.0
 ENV PULUMI_SKIP_UPDATE_CHECK=true
 
