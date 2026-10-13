@@ -24,6 +24,35 @@ fi
 echo "[paseo-ops] ownership set: $(stat -c '%n %u:%g %a' "$CLINE_CONFIG_DIR" "$CLINE_CONFIG_DIR/data/settings")"
 
 # --- 2. Daemon config: plugins, web UI, Cline ACP provider. Rewritten when it differs.
+# Model list comes from the installed CLI, so a bump cannot leave it stale.
+# Canonical <provider>/ ids only: the catalog also carries aliases.
+LLMS_MODELS="${CLINE_MODELS_MODULE:-/usr/local/lib/node_modules/cline/node_modules/@cline/llms/dist/models.js}"
+MODEL_PROVIDER="${CLINE_MODELS_PROVIDER:-cline-pass}"
+DEFAULT_MODEL="${CLINE_DEFAULT_MODEL:-cline-pass/deepseek-v4.1-flash}"
+if [ ! -f "$LLMS_MODELS" ]; then
+  echo "[paseo-ops] FATAL: no Cline model catalog at $LLMS_MODELS" >&2
+  exit 1
+fi
+ADDITIONAL_MODELS="$(node -e '
+  const m = require(process.argv[1]);
+  const generated = m.getGeneratedModelsForProvider(process.argv[2]);
+  const models = Array.isArray(generated) ? generated : Object.values(generated || {});
+  const prefix = process.argv[2] + "/";
+  const list = models
+    .filter((e) => e && typeof e.id === "string" && e.id.startsWith(prefix))
+    .map((e) => ({ id: e.id, label: e.name || e.id }));
+  if (list.length === 0) { console.error("no models under " + prefix); process.exit(1); }
+  if (process.argv[3] && !list.some((e) => e.id === process.argv[3])) {
+    list.push({ id: process.argv[3], label: process.argv[3].slice(prefix.length) });
+  }
+  for (const entry of list) if (entry.id === process.argv[3]) entry.isDefault = true;
+  console.log(JSON.stringify(list));
+' "$LLMS_MODELS" "$MODEL_PROVIDER" "$DEFAULT_MODEL")" || {
+  echo "[paseo-ops] FATAL: could not list models for $MODEL_PROVIDER" >&2
+  exit 1
+}
+echo "[paseo-ops] models: $(printf '%s' "$ADDITIONAL_MODELS" | jq 'length') for $MODEL_PROVIDER"
+
 cfg="$(mktemp)"
 cat > "$cfg" <<JSON
 {
@@ -40,20 +69,7 @@ cat > "$cfg" <<JSON
         "extends": "acp",
         "label": "ClinePass",
         "command": ["/usr/local/bin/cline", "--config", "${CLINE_CONFIG_DIR}", "--acp"],
-        "additionalModels": [
-          { "id": "cline-pass/glm-5.3", "label": "ClinePass GLM-5.3" },
-          { "id": "cline-pass/glm-5.3-flash", "label": "ClinePass GLM-5.3 Flash" },
-          { "id": "cline-pass/kimi-k3", "label": "ClinePass Kimi K3" },
-          { "id": "cline-pass/deepseek-v4-pro", "label": "ClinePass DeepSeek V4 Pro" },
-          { "id": "cline-pass/deepseek-v4.1-flash", "label": "ClinePass DeepSeek V4.1 Flash", "isDefault": true },
-          { "id": "cline-pass/mimo-v2.5", "label": "ClinePass MiMo-V2.5" },
-          { "id": "cline-pass/mimo-v2.5-pro", "label": "ClinePass MiMo-V2.5-Pro" },
-          { "id": "cline-pass/minimax-m3", "label": "ClinePass MiniMax M3" },
-          { "id": "cline-pass/muse-spark-1.3-contributor", "label": "ClinePass Muse Spark 1.3 Contributor" },
-          { "id": "cline-pass/qwen3.8-max", "label": "ClinePass Qwen3.8 Max" },
-          { "id": "cline-pass/qwen3.7-max", "label": "ClinePass Qwen3.7 Max" },
-          { "id": "cline-pass/qwen3.7-plus", "label": "ClinePass Qwen3.7 Plus" }
-        ]
+        "additionalModels": ${ADDITIONAL_MODELS}
       }
     }
   }
