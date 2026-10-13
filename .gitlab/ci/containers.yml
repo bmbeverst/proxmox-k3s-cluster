@@ -160,6 +160,34 @@ build:vints-backup:
         - .gitlab/ci/containers.yml
     - when: never
 
+build:paseo:
+  stage: build
+  image: quay.io/containers/buildah:v1.43.4-immutable
+  resource_group: build-paseo
+  script:
+    - |
+      set -euo pipefail
+      REPO="$CI_REGISTRY_IMAGE/paseo"
+      TAG=$(grep '^paseo_image_tag:' pulumi/versions.yaml | awk '{print $2}')
+      printf '%s' "$TAG" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' \
+        || { echo "FATAL: paseo_image_tag in pulumi/versions.yaml is not X.Y.Z"; exit 1; }
+      echo "Building $REPO:$TAG"
+      # --layers dedupes layers in the registry; --format docker keeps the HEALTHCHECK.
+      buildah build --layers --storage-driver=vfs --isolation=chroot \
+        --format docker \
+        --tag "$REPO:$TAG" \
+        pulumi/my-apps/containers/paseo
+      buildah push --storage-driver=vfs \
+        --creds "$CI_REGISTRY_USER:$CI_REGISTRY_PASSWORD" \
+        "$REPO:$TAG"
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "push"
+      changes:
+        - pulumi/my-apps/containers/paseo/**
+        - pulumi/versions.yaml
+        - .gitlab/ci/containers.yml
+    - when: never
+
 # The mod bundle image: CI resolves + verifies every pin once and publishes the resulting depot, so
 # the pod seeds its PVC depot from the registry instead of the Mod DB. `:latest` is pushed from the
 # default branch only, so a feature branch can never clobber what the cluster pulls.
