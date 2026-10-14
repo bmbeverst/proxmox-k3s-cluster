@@ -18,7 +18,7 @@ import yaml
 import pulumi
 import pulumi_kubernetes as k8s
 import pulumi_kubernetes.batch as k8s_batch  # for the backup CronJob
-import pulumi_kubernetes.rbac as k8s_rbac    # for the backup CronJob's RBAC
+import pulumi_kubernetes.rbac as k8s_rbac  # for the backup CronJob's RBAC
 from pulumi_kubernetes.meta.v1 import ObjectMetaArgs
 
 with open(os.path.join(os.path.dirname(__file__), "..", "versions.yaml")) as f:
@@ -29,8 +29,12 @@ NAMESPACE = "vintagestory"
 # Images are built + pushed to the project GitLab registry by CI.
 VINTS_REGISTRY = "registry.gitlab.com"
 VINTS_REGISTRY_IMAGE_ROOT = f"{VINTS_REGISTRY}/proxmox-k3s/proxmox-k3s-cluster"
-VINTS_IMAGE = f"{VINTS_REGISTRY_IMAGE_ROOT}/vints-server:{_versions['vints_server_image_tag']}"
-VINTS_BACKUP_IMAGE = f"{VINTS_REGISTRY_IMAGE_ROOT}/vints-backup:{_versions['vints_backup_image_tag']}"
+VINTS_IMAGE = (
+    f"{VINTS_REGISTRY_IMAGE_ROOT}/vints-server:{_versions['vints_server_image_tag']}"
+)
+VINTS_BACKUP_IMAGE = (
+    f"{VINTS_REGISTRY_IMAGE_ROOT}/vints-backup:{_versions['vints_backup_image_tag']}"
+)
 # The CI-baked mod depot (`bake:vints-mods`); the seed init container copies /bundle from it. No
 # versions.yaml entry on purpose: the tag is fixed, the content moves with the pins.
 VINTS_MODS_IMAGE = f"{VINTS_REGISTRY_IMAGE_ROOT}/vints-mods:latest"
@@ -41,19 +45,22 @@ _vints_registry_token = _vints_cfg.require_secret("vintsRegistryReadToken")
 
 
 def _vints_dockerconfigjson(user, token):
-    return json.dumps({
-        "auths": {
-            VINTS_REGISTRY: {
-                "username": user,
-                "password": token,
-                "auth": base64.b64encode(f"{user}:{token}".encode()).decode(),
+    return json.dumps(
+        {
+            "auths": {
+                VINTS_REGISTRY: {
+                    "username": user,
+                    "password": token,
+                    "auth": base64.b64encode(f"{user}:{token}".encode()).decode(),
+                }
             }
         }
-    })
+    )
 
 
-_vints_dockerconfig = pulumi.Output.all(_vints_registry_user, _vints_registry_token).apply(
-    lambda ut: _vints_dockerconfigjson(ut[0], ut[1]))
+_vints_dockerconfig = pulumi.Output.all(
+    _vints_registry_user, _vints_registry_token
+).apply(lambda ut: _vints_dockerconfigjson(ut[0], ut[1]))
 
 VINTS_PREFERRED_NODES = ["node1", "node2"]
 VINTS_PORT = 42420
@@ -61,12 +68,16 @@ VINTS_LB_IP = "10.10.1.91"  # kube-vip LoadBalancer VIP (static)
 # Server console input: the FIFO start-vints.sh keeps open as the server's stdin.
 VINTS_CONSOLE_FIFO = "/tmp/vints-console.fifo"
 VINTS_NFS_SERVER = "10.10.1.101"  # host serving the backup export
-VINTS_NFS_PATH = "/pvebackup"     # export; writable by uid 1001
+VINTS_NFS_PATH = "/pvebackup"  # export; writable by uid 1001
 
 # The mod pins are the source of truth and live in git: one "<key>: <version|url>" line per mod,
 # where a version pin's key is the mod's internal Mod ID (the same key Renovate tracks and the game
 # loads). The resolver in the image turns them into $DATA_PATH/Mods on every pod start.
-with open(os.path.join(os.path.dirname(__file__), "containers", "server", "vintagestory-mods.yaml")) as f:
+with open(
+    os.path.join(
+        os.path.dirname(__file__), "containers", "server", "vintagestory-mods.yaml"
+    )
+) as f:
     _vints_mods = f.read()
 
 
@@ -81,8 +92,7 @@ def _vints_env():
 
 
 def _vints_preferred_nodes():
-    """Prefer the nodes holding a diskful vints-data replica, without pinning.
-    """
+    """Prefer the nodes holding a diskful vints-data replica, without pinning."""
     return k8s.core.v1.AffinityArgs(
         node_affinity=k8s.core.v1.NodeAffinityArgs(
             preferred_during_scheduling_ignored_during_execution=[
@@ -173,7 +183,8 @@ def register(namespace):
             strategy=k8s.apps.v1.DeploymentStrategyArgs(
                 type="RollingUpdate",
                 rolling_update=k8s.apps.v1.RollingUpdateDeploymentArgs(
-                    max_surge=0, max_unavailable=1),
+                    max_surge=0, max_unavailable=1
+                ),
             ),
             selector=k8s.meta.v1.LabelSelectorArgs(match_labels={"app": "vints"}),
             template=k8s.core.v1.PodTemplateSpecArgs(
@@ -201,41 +212,50 @@ def register(namespace):
                             name="vints-mods-seed",
                             image=VINTS_MODS_IMAGE,
                             image_pull_policy="Always",
-                            command=["sh", "-c",
-                                     "mkdir -p /data/.vints-mods/seed"
-                                     " && cp -R /bundle/. /data/.vints-mods/seed/"],
+                            command=[
+                                "sh",
+                                "-c",
+                                "mkdir -p /data/.vints-mods/seed"
+                                " && cp -R /bundle/. /data/.vints-mods/seed/",
+                            ],
                             security_context=k8s.core.v1.SecurityContextArgs(
                                 run_as_non_root=True,
                                 allow_privilege_escalation=False,
                                 read_only_root_filesystem=True,
-                                capabilities=k8s.core.v1.CapabilitiesArgs(
-                                    drop=["ALL"]),
+                                capabilities=k8s.core.v1.CapabilitiesArgs(drop=["ALL"]),
                             ),
                             volume_mounts=[
                                 k8s.core.v1.VolumeMountArgs(
-                                    name="vints-data", mount_path="/data"),
+                                    name="vints-data", mount_path="/data"
+                                ),
                             ],
                         ),
                         k8s.core.v1.ContainerArgs(
                             name="vints-installer",
                             image=VINTS_IMAGE,
                             image_pull_policy="Always",
-                            command=["/entrypoints/resolve-vints-mods.sh", "--stage",
-                                     "--mods", "/config/mods.yaml",
-                                     "--seed", "/data/.vints-mods/seed"],
+                            command=[
+                                "/entrypoints/resolve-vints-mods.sh",
+                                "--stage",
+                                "--mods",
+                                "/config/mods.yaml",
+                                "--seed",
+                                "/data/.vints-mods/seed",
+                            ],
                             env=_vints_env(),
                             security_context=k8s.core.v1.SecurityContextArgs(
                                 run_as_non_root=True,
                                 allow_privilege_escalation=False,
                                 read_only_root_filesystem=True,
-                                capabilities=k8s.core.v1.CapabilitiesArgs(
-                                    drop=["ALL"]),
+                                capabilities=k8s.core.v1.CapabilitiesArgs(drop=["ALL"]),
                             ),
                             volume_mounts=[
                                 k8s.core.v1.VolumeMountArgs(
-                                    name="vints-data", mount_path="/data"),
+                                    name="vints-data", mount_path="/data"
+                                ),
                                 k8s.core.v1.VolumeMountArgs(
-                                    name="vints-config", mount_path="/config"),
+                                    name="vints-config", mount_path="/config"
+                                ),
                             ],
                         ),
                     ],
@@ -254,16 +274,19 @@ def register(namespace):
                             security_context=k8s.core.v1.SecurityContextArgs(
                                 run_as_non_root=True,
                                 allow_privilege_escalation=False,
-                                capabilities=k8s.core.v1.CapabilitiesArgs(
-                                    drop=["ALL"]),
+                                capabilities=k8s.core.v1.CapabilitiesArgs(drop=["ALL"]),
                             ),
                             ports=[
                                 k8s.core.v1.ContainerPortArgs(
-                                    name="game-tcp", container_port=VINTS_PORT,
-                                    protocol="TCP"),
+                                    name="game-tcp",
+                                    container_port=VINTS_PORT,
+                                    protocol="TCP",
+                                ),
                                 k8s.core.v1.ContainerPortArgs(
-                                    name="game-udp", container_port=VINTS_PORT,
-                                    protocol="UDP"),
+                                    name="game-udp",
+                                    container_port=VINTS_PORT,
+                                    protocol="UDP",
+                                ),
                             ],
                             resources=k8s.core.v1.ResourceRequirementsArgs(
                                 requests={"cpu": "1000m", "memory": "2Gi"},
@@ -271,7 +294,8 @@ def register(namespace):
                             ),
                             readiness_probe=k8s.core.v1.ProbeArgs(
                                 tcp_socket=k8s.core.v1.TCPSocketActionArgs(
-                                    port=VINTS_PORT),
+                                    port=VINTS_PORT
+                                ),
                                 initial_delay_seconds=15,
                                 period_seconds=10,
                                 timeout_seconds=5,
@@ -279,7 +303,8 @@ def register(namespace):
                             ),
                             liveness_probe=k8s.core.v1.ProbeArgs(
                                 tcp_socket=k8s.core.v1.TCPSocketActionArgs(
-                                    port=VINTS_PORT),
+                                    port=VINTS_PORT
+                                ),
                                 initial_delay_seconds=120,  # world load can be slow
                                 period_seconds=30,
                                 timeout_seconds=5,
@@ -287,21 +312,24 @@ def register(namespace):
                             ),
                             volume_mounts=[
                                 k8s.core.v1.VolumeMountArgs(
-                                    name="vints-data", mount_path="/data"),
+                                    name="vints-data", mount_path="/data"
+                                ),
                             ],
                         ),
                     ],
                     volumes=[
                         k8s.core.v1.VolumeArgs(
                             name="vints-data",
-                            persistent_volume_claim=k8s.core.v1.
-                            PersistentVolumeClaimVolumeSourceArgs(
-                                claim_name="vints-data"),
+                            persistent_volume_claim=k8s.core.v1.PersistentVolumeClaimVolumeSourceArgs(
+                                claim_name="vints-data"
+                            ),
                         ),
                         k8s.core.v1.VolumeArgs(
                             name="vints-config",
                             config_map=k8s.core.v1.ConfigMapVolumeSourceArgs(
-                                name="vints-config")),
+                                name="vints-config"
+                            ),
+                        ),
                     ],
                 ),
             ),
@@ -325,11 +353,17 @@ def register(namespace):
             external_traffic_policy="Local",
             ports=[
                 k8s.core.v1.ServicePortArgs(
-                    name="game-tcp", port=VINTS_PORT, target_port=VINTS_PORT,
-                    protocol="TCP"),
+                    name="game-tcp",
+                    port=VINTS_PORT,
+                    target_port=VINTS_PORT,
+                    protocol="TCP",
+                ),
                 k8s.core.v1.ServicePortArgs(
-                    name="game-udp", port=VINTS_PORT, target_port=VINTS_PORT,
-                    protocol="UDP"),
+                    name="game-udp",
+                    port=VINTS_PORT,
+                    target_port=VINTS_PORT,
+                    protocol="UDP",
+                ),
             ],
         ),
         opts=pulumi.ResourceOptions(depends_on=[namespace, vints]),
@@ -364,10 +398,12 @@ def register(namespace):
         "vints-backup",
         metadata=ObjectMetaArgs(name="vints-backup", namespace=NAMESPACE),
         role_ref=k8s_rbac.v1.RoleRefArgs(
-            api_group="rbac.authorization.k8s.io", kind="Role", name="vints-backup"),
+            api_group="rbac.authorization.k8s.io", kind="Role", name="vints-backup"
+        ),
         subjects=[
             k8s_rbac.v1.SubjectArgs(
-                kind="ServiceAccount", name="vints-backup", namespace=NAMESPACE),
+                kind="ServiceAccount", name="vints-backup", namespace=NAMESPACE
+            ),
         ],
         opts=pulumi.ResourceOptions(depends_on=[vints_backup_sa, vints_backup_role]),
     )
@@ -395,9 +431,12 @@ def register(namespace):
                             service_account_name="vints-backup",
                             affinity=_vints_backup_placement(),
                             security_context=k8s.core.v1.PodSecurityContextArgs(
-                                fs_group=1001, run_as_user=1001),
+                                fs_group=1001, run_as_user=1001
+                            ),
                             image_pull_secrets=[
-                                k8s.core.v1.LocalObjectReferenceArgs(name="vints-regcred"),
+                                k8s.core.v1.LocalObjectReferenceArgs(
+                                    name="vints-regcred"
+                                ),
                             ],
                             containers=[
                                 k8s.core.v1.ContainerArgs(
@@ -421,35 +460,40 @@ def register(namespace):
                                         allow_privilege_escalation=False,
                                         read_only_root_filesystem=True,
                                         capabilities=k8s.core.v1.CapabilitiesArgs(
-                                            drop=["ALL"]),
+                                            drop=["ALL"]
+                                        ),
                                     ),
                                     volume_mounts=[
                                         k8s.core.v1.VolumeMountArgs(
-                                            name="vints-data", mount_path="/data"),
+                                            name="vints-data", mount_path="/data"
+                                        ),
                                         k8s.core.v1.VolumeMountArgs(
-                                            name="vints-nfs", mount_path="/backups"),
+                                            name="vints-nfs", mount_path="/backups"
+                                        ),
                                         k8s.core.v1.VolumeMountArgs(
-                                            name="tmp", mount_path="/tmp"),
+                                            name="tmp", mount_path="/tmp"
+                                        ),
                                     ],
                                 ),
                             ],
                             volumes=[
                                 k8s.core.v1.VolumeArgs(
                                     name="vints-data",
-                                    persistent_volume_claim=k8s.core.v1.
-                                    PersistentVolumeClaimVolumeSourceArgs(
-                                        claim_name="vints-data"),
+                                    persistent_volume_claim=k8s.core.v1.PersistentVolumeClaimVolumeSourceArgs(
+                                        claim_name="vints-data"
+                                    ),
                                 ),
                                 # Direct NFS mount (kernel client); writable by uid 1001.
                                 k8s.core.v1.VolumeArgs(
                                     name="vints-nfs",
                                     nfs=k8s.core.v1.NFSVolumeSourceArgs(
-                                        server=VINTS_NFS_SERVER,
-                                        path=VINTS_NFS_PATH),
+                                        server=VINTS_NFS_SERVER, path=VINTS_NFS_PATH
+                                    ),
                                 ),
                                 k8s.core.v1.VolumeArgs(
                                     name="tmp",
-                                    empty_dir=k8s.core.v1.EmptyDirVolumeSourceArgs()),
+                                    empty_dir=k8s.core.v1.EmptyDirVolumeSourceArgs(),
+                                ),
                             ],
                         ),
                     ),

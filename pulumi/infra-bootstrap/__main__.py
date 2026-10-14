@@ -53,6 +53,7 @@ def _load_pko_crds() -> list:
             docs.append(yaml.safe_load(r))
     return docs
 
+
 # Create new Kubernetes Namespaces
 namespace = Namespace(
     "pulumi-kubernetes-operator",

@@ -52,7 +52,10 @@ def _fix_suc_ssl_paths(
             "name": "usr-share-ssl",
         },
         {
-            "hostPath": {"path": "/usr/share/ca-certificates", "type": "DirectoryOrCreate"},
+            "hostPath": {
+                "path": "/usr/share/ca-certificates",
+                "type": "DirectoryOrCreate",
+            },
             "name": "usr-share-ca-certificates",
         },
     ]
@@ -369,7 +372,6 @@ vmsingle = k8s.helm.v3.Release(
                                 "job_name": "victoriametrics",
                                 "static_configs": [{"targets": ["localhost:8428"]}],
                             },
-
                             # kubelet cAdvisor — KRR queries this for container CPU/memory usage
                             {
                                 "job_name": "kubelet",
@@ -387,7 +389,9 @@ vmsingle = k8s.helm.v3.Release(
                                         "regex": "__meta_kubernetes_node_label_(.+)",
                                     },
                                     {
-                                        "source_labels": ["__meta_kubernetes_node_name"],
+                                        "source_labels": [
+                                            "__meta_kubernetes_node_name"
+                                        ],
                                         "target_label": "node",
                                     },
                                 ],

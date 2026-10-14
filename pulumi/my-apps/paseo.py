@@ -70,19 +70,22 @@ _paseo_pulumi_token = _paseo_cfg.require_secret("pulumiAccessToken")
 
 
 def _paseo_dockerconfigjson(user, token):
-    return json.dumps({
-        "auths": {
-            PASEO_REGISTRY: {
-                "username": user,
-                "password": token,
-                "auth": base64.b64encode(f"{user}:{token}".encode()).decode(),
+    return json.dumps(
+        {
+            "auths": {
+                PASEO_REGISTRY: {
+                    "username": user,
+                    "password": token,
+                    "auth": base64.b64encode(f"{user}:{token}".encode()).decode(),
+                }
             }
         }
-    })
+    )
 
 
-_paseo_dockerconfig = pulumi.Output.all(_paseo_registry_user, _paseo_registry_token).apply(
-    lambda ut: _paseo_dockerconfigjson(ut[0], ut[1]))
+_paseo_dockerconfig = pulumi.Output.all(
+    _paseo_registry_user, _paseo_registry_token
+).apply(lambda ut: _paseo_dockerconfigjson(ut[0], ut[1]))
 
 
 def _paseo_git_env(token):
@@ -193,7 +196,8 @@ def register(namespace):
         metadata=ObjectMetaArgs(name="paseo-read"),
         rules=[
             k8s_rbac.v1.PolicyRuleArgs(
-                api_groups=["*"], resources=["*"], verbs=["get", "list", "watch"]),
+                api_groups=["*"], resources=["*"], verbs=["get", "list", "watch"]
+            ),
         ],
         opts=pulumi.ResourceOptions(depends_on=[namespace]),
     )
@@ -202,9 +206,12 @@ def register(namespace):
         "paseo",
         metadata=ObjectMetaArgs(name="paseo"),
         role_ref=k8s_rbac.v1.RoleRefArgs(
-            api_group="rbac.authorization.k8s.io", kind="ClusterRole", name="paseo-read"),
+            api_group="rbac.authorization.k8s.io", kind="ClusterRole", name="paseo-read"
+        ),
         subjects=[
-            k8s_rbac.v1.SubjectArgs(kind="ServiceAccount", name="paseo", namespace=NAMESPACE),
+            k8s_rbac.v1.SubjectArgs(
+                kind="ServiceAccount", name="paseo", namespace=NAMESPACE
+            ),
         ],
         opts=pulumi.ResourceOptions(depends_on=[paseo_sa, paseo_read]),
     )
@@ -222,7 +229,8 @@ def register(namespace):
             strategy=k8s.apps.v1.DeploymentStrategyArgs(
                 type="RollingUpdate",
                 rolling_update=k8s.apps.v1.RollingUpdateDeploymentArgs(
-                    max_surge=0, max_unavailable=1),
+                    max_surge=0, max_unavailable=1
+                ),
             ),
             selector=k8s.meta.v1.LabelSelectorArgs(match_labels={"app": "paseo"}),
             template=k8s.core.v1.PodTemplateSpecArgs(
@@ -269,9 +277,11 @@ def register(namespace):
                             ),
                             volume_mounts=[
                                 k8s.core.v1.VolumeMountArgs(
-                                    name="paseo-home", mount_path=PASEO_HOME_DIR),
+                                    name="paseo-home", mount_path=PASEO_HOME_DIR
+                                ),
                                 k8s.core.v1.VolumeMountArgs(
-                                    name="paseo-workspace", mount_path=PASEO_WORKSPACE),
+                                    name="paseo-workspace", mount_path=PASEO_WORKSPACE
+                                ),
                             ],
                         ),
                     ],
@@ -285,22 +295,38 @@ def register(namespace):
                                     name="PASEO_PASSWORD",
                                     value_from=k8s.core.v1.EnvVarSourceArgs(
                                         secret_key_ref=k8s.core.v1.SecretKeySelectorArgs(
-                                            name="paseo-secrets", key="paseo-password")),
+                                            name="paseo-secrets", key="paseo-password"
+                                        )
+                                    ),
                                 ),
                                 k8s.core.v1.EnvVarArgs(
                                     name="PULUMI_ACCESS_TOKEN",
                                     value_from=k8s.core.v1.EnvVarSourceArgs(
                                         secret_key_ref=k8s.core.v1.SecretKeySelectorArgs(
-                                            name="paseo-secrets", key="pulumi-access-token")),
+                                            name="paseo-secrets",
+                                            key="pulumi-access-token",
+                                        )
+                                    ),
                                 ),
                                 # The ops panel resolves the guard binary at plugin load.
-                                {"name": "CLINE_GUARD_BIN",
-                                 "value": "/opt/dangerous-command-guard/cline-approve-dangerous"},
-                                {"name": "CLINE_PROVIDERS_SEED", "value": PASEO_CLINE_SEED_PATH},
+                                {
+                                    "name": "CLINE_GUARD_BIN",
+                                    "value": "/opt/dangerous-command-guard/cline-approve-dangerous",
+                                },
+                                {
+                                    "name": "CLINE_PROVIDERS_SEED",
+                                    "value": PASEO_CLINE_SEED_PATH,
+                                },
                                 {"name": "GIT_AUTHOR_NAME", "value": "paseo"},
-                                {"name": "GIT_AUTHOR_EMAIL", "value": "paseo@localhost"},
+                                {
+                                    "name": "GIT_AUTHOR_EMAIL",
+                                    "value": "paseo@localhost",
+                                },
                                 # What the postStart hook below registers.
-                                {"name": "PASEO_REPO_DIRS", "value": " ".join(PASEO_REPO_DIRS)},
+                                {
+                                    "name": "PASEO_REPO_DIRS",
+                                    "value": " ".join(PASEO_REPO_DIRS),
+                                },
                                 *_paseo_git_env(_paseo_git_token),
                             ],
                             # Cannot live in the init container: the daemon is started by the
@@ -309,31 +335,36 @@ def register(namespace):
                             lifecycle=k8s.core.v1.LifecycleArgs(
                                 post_start=k8s.core.v1.LifecycleHandlerArgs(
                                     exec_=k8s.core.v1.ExecActionArgs(
-                                        command=["/bin/sh", "-c", PASEO_REGISTER_SCRIPT]),
+                                        command=["/bin/sh", "-c", PASEO_REGISTER_SCRIPT]
+                                    ),
                                 ),
                             ),
                             ports=[
                                 k8s.core.v1.ContainerPortArgs(
-                                    name="http", container_port=PASEO_PORT),
+                                    name="http", container_port=PASEO_PORT
+                                ),
                             ],
                             # /api/health is unauthenticated; the daemon seeds volumes first, allow a slow start.
                             startup_probe=k8s.core.v1.ProbeArgs(
                                 http_get=k8s.core.v1.HTTPGetActionArgs(
-                                    path="/api/health", port=PASEO_PORT),
+                                    path="/api/health", port=PASEO_PORT
+                                ),
                                 period_seconds=5,
                                 failure_threshold=24,
                                 timeout_seconds=3,
                             ),
                             readiness_probe=k8s.core.v1.ProbeArgs(
                                 http_get=k8s.core.v1.HTTPGetActionArgs(
-                                    path="/api/health", port=PASEO_PORT),
+                                    path="/api/health", port=PASEO_PORT
+                                ),
                                 period_seconds=10,
                                 failure_threshold=3,
                                 timeout_seconds=3,
                             ),
                             liveness_probe=k8s.core.v1.ProbeArgs(
                                 http_get=k8s.core.v1.HTTPGetActionArgs(
-                                    path="/api/health", port=PASEO_PORT),
+                                    path="/api/health", port=PASEO_PORT
+                                ),
                                 period_seconds=20,
                                 failure_threshold=3,
                                 timeout_seconds=5,
@@ -353,26 +384,31 @@ def register(namespace):
                             ),
                             volume_mounts=[
                                 k8s.core.v1.VolumeMountArgs(
-                                    name="paseo-home", mount_path=PASEO_HOME_DIR),
+                                    name="paseo-home", mount_path=PASEO_HOME_DIR
+                                ),
                                 k8s.core.v1.VolumeMountArgs(
-                                    name="paseo-workspace", mount_path=PASEO_WORKSPACE),
+                                    name="paseo-workspace", mount_path=PASEO_WORKSPACE
+                                ),
                                 k8s.core.v1.VolumeMountArgs(
-                                    name="cline-seed", mount_path="/etc/paseo-secrets", read_only=True),
+                                    name="cline-seed",
+                                    mount_path="/etc/paseo-secrets",
+                                    read_only=True,
+                                ),
                             ],
                         ),
                     ],
                     volumes=[
                         k8s.core.v1.VolumeArgs(
                             name="paseo-home",
-                            persistent_volume_claim=k8s.core.v1.
-                            PersistentVolumeClaimVolumeSourceArgs(
-                                claim_name="paseo-home"),
+                            persistent_volume_claim=k8s.core.v1.PersistentVolumeClaimVolumeSourceArgs(
+                                claim_name="paseo-home"
+                            ),
                         ),
                         k8s.core.v1.VolumeArgs(
                             name="paseo-workspace",
-                            persistent_volume_claim=k8s.core.v1.
-                            PersistentVolumeClaimVolumeSourceArgs(
-                                claim_name="paseo-workspace"),
+                            persistent_volume_claim=k8s.core.v1.PersistentVolumeClaimVolumeSourceArgs(
+                                claim_name="paseo-workspace"
+                            ),
                         ),
                         # 0444: copied as uid 1000; fsGroup may not reach a projected Secret.
                         k8s.core.v1.VolumeArgs(
@@ -382,7 +418,9 @@ def register(namespace):
                                 default_mode=0o444,
                                 items=[
                                     k8s.core.v1.KeyToPathArgs(
-                                        key="providers.json", path="cline-providers.json"),
+                                        key="providers.json",
+                                        path="cline-providers.json",
+                                    ),
                                 ],
                             ),
                         ),
@@ -391,8 +429,15 @@ def register(namespace):
             ),
         ),
         opts=pulumi.ResourceOptions(
-            depends_on=[namespace, paseo_regcred, paseo_secrets, paseo_cline_secret,
-                        paseo_home, paseo_workspace, paseo_sa],
+            depends_on=[
+                namespace,
+                paseo_regcred,
+                paseo_secrets,
+                paseo_cline_secret,
+                paseo_home,
+                paseo_workspace,
+                paseo_sa,
+            ],
             ignore_changes=[
                 'spec.template.metadata.annotations["reloader.stakater.com/last-reloaded-from"]',
             ],

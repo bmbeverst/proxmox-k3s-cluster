@@ -56,9 +56,9 @@ else:
         server.shell(
             name="Wait for init node k3s API to be reachable",
             commands=[
-                f'for i in $(seq 1 15); do '
+                f"for i in $(seq 1 15); do "
                 f'if curl -sk --connect-timeout 2 -o /dev/null "https://{init_node_ip}:6443"; then '
-                f'exit 0; fi; sleep 2; done; '
+                f"exit 0; fi; sleep 2; done; "
                 f'echo "init node {init_node_ip}:6443 not reachable after ~30s" >&2; exit 1'
             ],
         )

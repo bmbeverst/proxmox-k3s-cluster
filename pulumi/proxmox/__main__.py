@@ -34,7 +34,7 @@ ON_BOOT = False
 
 # Hardware / network defaults.
 CORES = 3
-MEMORY_MB = 9216   # 9 GiB; matches the running VMs (no floating = no balloon)
+MEMORY_MB = 9216  # 9 GiB; matches the running VMs (no floating = no balloon)
 BRIDGE = "vmbr0"
 GATEWAY = "10.10.1.1"
 
@@ -140,7 +140,17 @@ for node in NODES:
         },
         # Ignore harmless current-state drift so updates don't try to "fix" it.
         opts=pulumi.ResourceOptions(
-            ignore_changes=["agent", "cdrom", "disks", "serialDevices", "vga", "started",
-                             "macAddresses", "networkInterfaceNames", "ipv4Addresses", "ipv6Addresses"]
+            ignore_changes=[
+                "agent",
+                "cdrom",
+                "disks",
+                "serialDevices",
+                "vga",
+                "started",
+                "macAddresses",
+                "networkInterfaceNames",
+                "ipv4Addresses",
+                "ipv6Addresses",
+            ]
         ),
     )
