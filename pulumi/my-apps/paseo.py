@@ -338,11 +338,12 @@ def register(namespace):
                                 failure_threshold=3,
                                 timeout_seconds=5,
                             ),
-                            # Measured 1.2Gi working set / 1.54Gi cgroup peak, so a 1Gi request left
-                            # the pod running above its request and first in the eviction queue.
+                            # 2026-10-14: OOMKilled at the old 2Gi limit (measured peak 1906MiB
+                            # working set). Request 2Gi keeps it off the eviction queue; the 3Gi
+                            # limit leaves ~1Gi of burst headroom on any 8.72GiB node.
                             resources=k8s.core.v1.ResourceRequirementsArgs(
-                                requests={"cpu": "250m", "memory": "1536Mi"},
-                                limits={"cpu": "2000m", "memory": "2Gi"},
+                                requests={"cpu": "250m", "memory": "2Gi"},
+                                limits={"cpu": "2000m", "memory": "3Gi"},
                             ),
                             security_context=k8s.core.v1.SecurityContextArgs(
                                 run_as_user=PASEO_UID,
