@@ -89,12 +89,9 @@
       "rangeStrategy": "bump"
     },
     {
-      "description": "PKO chart: GitHub releases carry the timestamps; never automerge (review, then `pulumi up`)",
+      "description": "PKO chart: NEVER merge - merging makes PKO upgrade itself and wedge the Helm release",
       "matchManagers": [
         "helmv3"
-      ],
-      "matchDatasources": [
-        "docker"
       ],
       "matchDepNames": [
         "pulumi-kubernetes-operator"
@@ -106,7 +103,16 @@
       "overridePackageName": "pulumi/pulumi-kubernetes-operator",
       "extractVersion": "^pulumi-kubernetes-operator-(?<version>\\d+\\.\\d+\\.\\d+)$",
       "versioning": "helm",
-      "automerge": false
+      "automerge": false,
+      "addLabels": [
+        "DO-NOT-MERGE"
+      ],
+      "prTitle": "DO NOT MERGE - PKO chart {{{newVersion}}}: apply by hand with pulumi up",
+      "prBodyNotes": [
+        "# DO NOT MERGE",
+        "Merging this bump makes PKO upgrade its own chart, and that upgrade replaces the operator running it: the Helm release is cancelled mid-flight and left `pending-rollback`, after which every Helm operation fails with \"another operation (install/upgrade/rollback) is in progress\".",
+        "Apply it by hand from the dev box instead, then close this MR: `cd pulumi/infra-bootstrap && pulumi up --yes`"
+      ]
     },
     {
       "description": "Mods: no release-age cooldown - the boot smoke is the gate",
