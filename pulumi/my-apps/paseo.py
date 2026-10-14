@@ -36,10 +36,10 @@ PASEO_PORT = 6767
 PASEO_LB_IP = "10.10.1.62"
 
 # Repos cloned into the workspace PVC, one directory each. The token arrives via GIT_CONFIG_*
-# env and is never written to .git/config; one token covers every repo listed here, so a repo
-# it cannot reach needs its own entry (or a group access token).
+# env and is never written to .git/config; the single token must reach every repo listed here.
 PASEO_REPOS = [
     "https://gitlab.com/proxmox-k3s/proxmox-k3s-cluster.git",
+    "https://gitlab.com/Reed-DRB/galactic-phos.git",
 ]
 PASEO_WORKSPACE = "/workspace"
 # The clone lives one level down, so the PVC is a repos directory rather than a single checkout.
