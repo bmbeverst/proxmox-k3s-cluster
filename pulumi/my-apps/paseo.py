@@ -339,11 +339,11 @@ def register(namespace):
                                 timeout_seconds=5,
                             ),
                             # 2026-10-14: OOMKilled at the old 2Gi limit (measured peak 1906MiB
-                            # working set). Request 2Gi keeps it off the eviction queue; the 3Gi
+                            # working set). Request 3Gi keeps it off the eviction queue; the 4Gi
                             # limit leaves ~1Gi of burst headroom on any 8.72GiB node.
                             resources=k8s.core.v1.ResourceRequirementsArgs(
-                                requests={"cpu": "250m", "memory": "2Gi"},
-                                limits={"cpu": "2000m", "memory": "3Gi"},
+                                requests={"cpu": "250m", "memory": "3Gi"},
+                                limits={"cpu": "2000m", "memory": "4Gi"},
                             ),
                             security_context=k8s.core.v1.SecurityContextArgs(
                                 run_as_user=PASEO_UID,
