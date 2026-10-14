@@ -107,11 +107,18 @@ def _paseo_git_env(token):
     return env
 
 
-# Runs in the init container (see its env below) before the daemon. It sits outside the image's
-# build context, so this read keeps it manifest-carried: PKO ships a change to it without an
-# image rebuild.
-with open(os.path.join(os.path.dirname(__file__), "pod-scripts", "paseo-init.sh")) as f:
+# Pod-side scripts sit outside the image's build context, so reading them here keeps them
+# manifest-carried: PKO ships a change to one without an image rebuild.
+_POD_SCRIPTS = os.path.join(os.path.dirname(__file__), "pod-scripts")
+
+# Runs in the init container (see its env below) before the daemon.
+with open(os.path.join(_POD_SCRIPTS, "paseo-init.sh")) as f:
     PASEO_INIT_SCRIPT = f.read()
+
+# Runs as the app container's postStart hook, which is the first moment a daemon exists to
+# register repos with.
+with open(os.path.join(_POD_SCRIPTS, "paseo-register-projects.sh")) as f:
+    PASEO_REGISTER_SCRIPT = f.read()
 
 
 def register(namespace):
@@ -286,8 +293,19 @@ def register(namespace):
                                 {"name": "CLINE_PROVIDERS_SEED", "value": PASEO_CLINE_SEED_PATH},
                                 {"name": "GIT_AUTHOR_NAME", "value": "paseo"},
                                 {"name": "GIT_AUTHOR_EMAIL", "value": "paseo@localhost"},
+                                # What the postStart hook below registers.
+                                {"name": "PASEO_REPO_DIRS", "value": " ".join(PASEO_REPO_DIRS)},
                                 *_paseo_git_env(_paseo_git_token),
                             ],
+                            # Cannot live in the init container: the daemon is started by the
+                            # entrypoint, so there is nothing to register with until this
+                            # container is up. The script always exits 0.
+                            lifecycle=k8s.core.v1.LifecycleArgs(
+                                post_start=k8s.core.v1.LifecycleHandlerArgs(
+                                    exec_=k8s.core.v1.ExecActionArgs(
+                                        command=["/bin/sh", "-c", PASEO_REGISTER_SCRIPT]),
+                                ),
+                            ),
                             ports=[
                                 k8s.core.v1.ContainerPortArgs(
                                     name="http", container_port=PASEO_PORT),
