@@ -2,6 +2,8 @@
 
 - Image built from `containers/paseo/`, tag pinned in `versions.yaml`: Cline, Pulumi, uv, the
   `dangerous-command-guard` plugin (installed into `~/.cline` at start) and `paseo-ops-panel`.
+- The init container runs `pod-scripts/paseo-init.sh`: read from the repo at run time (not baked
+  into the image) and env-driven, so changes to it ship from git without a registry push.
 - `paseo-home` keeps daemon state, Cline credentials and guard grants; `paseo-workspace`
   is the repos directory (this repo under `proxmox-k3s-cluster/`).
 - Secrets: `paseoPassword` (daemon bearer token), `paseoClineProviders` (ClinePass bundle),
@@ -55,6 +57,8 @@ PASEO_CLINE_SEED_PATH = "/etc/paseo-secrets/cline-providers.json"
 
 # uid/gid the image runs as (`paseo`); the init container hands the volumes over.
 PASEO_UID = 1000
+# Passed to paseo-init.sh as its single chown target.
+PASEO_OWNER = f"{PASEO_UID}:{PASEO_UID}"
 
 _paseo_cfg = pulumi.Config("my-apps")
 _paseo_registry_user = _paseo_cfg.require_secret("vintsRegistryReadUser")
@@ -103,28 +107,11 @@ def _paseo_git_env(token):
     return env
 
 
-# Runs before the daemon: chown fresh PVCs, then clone or fetch every repo dir. Idempotent;
-# keeps unpushed work. Nothing here deletes or exits: one repo failing is logged and the others
-# are still prepared, so the daemon always starts.
-PASEO_INIT_SCRIPT = f"""\
-set -eux
-chown -R {PASEO_UID}:{PASEO_UID} {PASEO_HOME_DIR} {PASEO_WORKSPACE}
-for URL in {" ".join(PASEO_REPOS)}; do
-  REPO="{PASEO_WORKSPACE}/${{URL##*/}}"
-  REPO="${{REPO%.git}}"
-  if [ -d "$REPO/.git" ]; then
-    git -C "$REPO" fetch --prune origin || echo "ERROR: git fetch failed in $REPO" >&2
-  else
-    git clone "$URL" "$REPO" || echo "ERROR: git clone failed for $REPO" >&2
-  fi
-  if [ -d "$REPO/.git" ]; then
-    git -C "$REPO" rev-parse --verify -q HEAD >/dev/null || echo "ERROR: $REPO has no HEAD (incomplete clone)" >&2
-    # Remote stays tokenless on disk; insteadOf adds the credential at use time.
-    git -C "$REPO" remote set-url origin "$URL" || echo "ERROR: could not set the remote for $REPO" >&2
-    chown -R {PASEO_UID}:{PASEO_UID} "$REPO"
-  fi
-done
-"""
+# Runs in the init container (see its env below) before the daemon. It sits outside the image's
+# build context, so this read keeps it manifest-carried: PKO ships a change to it without an
+# image rebuild.
+with open(os.path.join(os.path.dirname(__file__), "pod-scripts", "paseo-init.sh")) as f:
+    PASEO_INIT_SCRIPT = f.read()
 
 
 def register(namespace):
@@ -255,7 +242,14 @@ def register(namespace):
                             image_pull_policy="IfNotPresent",
                             command=["/bin/sh", "-c"],
                             args=[PASEO_INIT_SCRIPT],
-                            env=_paseo_git_env(_paseo_git_token),
+                            env=[
+                                # Env-driven, so the script file stays static.
+                                {"name": "PASEO_OWNER", "value": PASEO_OWNER},
+                                {"name": "PASEO_HOME_DIR", "value": PASEO_HOME_DIR},
+                                {"name": "PASEO_WORKSPACE", "value": PASEO_WORKSPACE},
+                                {"name": "PASEO_REPOS", "value": " ".join(PASEO_REPOS)},
+                                *_paseo_git_env(_paseo_git_token),
+                            ],
                             security_context=k8s.core.v1.SecurityContextArgs(
                                 run_as_user=0,
                                 run_as_non_root=False,
