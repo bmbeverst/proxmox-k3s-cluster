@@ -2,7 +2,8 @@
 
 - Image built from `containers/paseo/`, tag pinned in `versions.yaml`: Cline, Pulumi, uv, the
   `dangerous-command-guard` plugin (installed into `~/.cline` at start) and `paseo-ops-panel`.
-- `paseo-home` keeps daemon state, Cline credentials and guard grants; `paseo-workspace` is the clone.
+- `paseo-home` keeps daemon state, Cline credentials and guard grants; `paseo-workspace`
+  is the repos directory (this repo under `proxmox-k3s-cluster/`).
 - Secrets: `paseoPassword` (daemon bearer token), `paseoClineProviders` (ClinePass bundle),
   `paseoGitToken` (clone + agent pushes, needs `write_repository`), `pulumiAccessToken` (panel preview).
 - Hands-off: merge to `main`, PKO applies. Nothing applied by hand.
@@ -32,9 +33,20 @@ PASEO_PORT = 6767
 # kube-vip LoadBalancer VIP (static). .60 traefik, .90 ghost and .91 vints are taken.
 PASEO_LB_IP = "10.10.1.62"
 
-# Agent's clone of this repo: token via GIT_CONFIG_* env, never written to .git/config.
-PASEO_REPO_URL = "https://gitlab.com/proxmox-k3s/proxmox-k3s-cluster.git"
+# Repos cloned into the workspace PVC, one directory each. The token arrives via GIT_CONFIG_*
+# env and is never written to .git/config; one token covers every repo listed here, so a repo
+# it cannot reach needs its own entry (or a group access token).
+PASEO_REPOS = [
+    "https://gitlab.com/proxmox-k3s/proxmox-k3s-cluster.git",
+]
 PASEO_WORKSPACE = "/workspace"
+# The clone lives one level down, so the PVC is a repos directory rather than a single checkout.
+# Paseo projects are registered at a repo dir; it is also the panel cwd, so the first repo leads.
+PASEO_REPO_DIRS = [
+    f"{PASEO_WORKSPACE}/{url.rstrip('/').rsplit('/', 1)[-1].removesuffix('.git')}"
+    for url in PASEO_REPOS
+]
+PASEO_REPO_DIR = PASEO_REPO_DIRS[0]
 PASEO_HOME_DIR = "/home/paseo"
 
 # The image's entrypoint copies this file into ~/.cline/data/settings/providers.json (fatal if absent).
@@ -73,35 +85,45 @@ def _paseo_git_env(token):
     """Git env for both containers: no credential ever lands on the PVC.
 
     `url.<authed>.insteadOf` rewrites the tokenless remote at use time; `safe.directory` lets
-    uid 1000 read the tree the root init container cloned.
+    uid 1000 read the trees the root init container cloned, one entry per repo.
     """
-    return [
+    env = [
         {"name": "GITLAB_TOKEN", "value": token},
         {"name": "GIT_TERMINAL_PROMPT", "value": "0"},
-        {"name": "GIT_CONFIG_COUNT", "value": "2"},
+        {"name": "GIT_CONFIG_COUNT", "value": str(1 + len(PASEO_REPO_DIRS))},
         {
             "name": "GIT_CONFIG_KEY_0",
             "value": "url.https://oauth2:$(GITLAB_TOKEN)@gitlab.com/.insteadOf",
         },
         {"name": "GIT_CONFIG_VALUE_0", "value": "https://gitlab.com/"},
-        {"name": "GIT_CONFIG_KEY_1", "value": "safe.directory"},
-        {"name": "GIT_CONFIG_VALUE_1", "value": PASEO_WORKSPACE},
     ]
+    for index, repo_dir in enumerate(PASEO_REPO_DIRS, start=1):
+        env.append({"name": f"GIT_CONFIG_KEY_{index}", "value": "safe.directory"})
+        env.append({"name": f"GIT_CONFIG_VALUE_{index}", "value": repo_dir})
+    return env
 
 
-# Runs before the daemon: chown fresh PVCs, prepare /workspace. Idempotent; keeps unpushed work.
+# Runs before the daemon: chown fresh PVCs, then clone or fetch every repo dir. Idempotent;
+# keeps unpushed work. Nothing here deletes or exits: one repo failing is logged and the others
+# are still prepared, so the daemon always starts.
 PASEO_INIT_SCRIPT = f"""\
 set -eux
 chown -R {PASEO_UID}:{PASEO_UID} {PASEO_HOME_DIR} {PASEO_WORKSPACE}
-if git -C {PASEO_WORKSPACE} rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-  git -C {PASEO_WORKSPACE} fetch --prune origin
-else
-  rm -rf {PASEO_WORKSPACE}/* {PASEO_WORKSPACE}/.[!.]*
-  git clone {PASEO_REPO_URL} {PASEO_WORKSPACE}
-fi
-# Remote stays tokenless on disk; insteadOf adds the credential at use time.
-git -C {PASEO_WORKSPACE} remote set-url origin {PASEO_REPO_URL}
-chown -R {PASEO_UID}:{PASEO_UID} {PASEO_WORKSPACE}
+for URL in {" ".join(PASEO_REPOS)}; do
+  REPO="{PASEO_WORKSPACE}/${{URL##*/}}"
+  REPO="${{REPO%.git}}"
+  if [ -d "$REPO/.git" ]; then
+    git -C "$REPO" fetch --prune origin || echo "ERROR: git fetch failed in $REPO" >&2
+  else
+    git clone "$URL" "$REPO" || echo "ERROR: git clone failed for $REPO" >&2
+  fi
+  if [ -d "$REPO/.git" ]; then
+    git -C "$REPO" rev-parse --verify -q HEAD >/dev/null || echo "ERROR: $REPO has no HEAD (incomplete clone)" >&2
+    # Remote stays tokenless on disk; insteadOf adds the credential at use time.
+    git -C "$REPO" remote set-url origin "$URL" || echo "ERROR: could not set the remote for $REPO" >&2
+    chown -R {PASEO_UID}:{PASEO_UID} "$REPO"
+  fi
+done
 """
 
 
