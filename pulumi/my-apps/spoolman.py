@@ -1,7 +1,7 @@
 """Spoolman filament-spool manager (own `spoolman` namespace).
 
 - Upstream image, pinned in `versions.yaml`. SQLite only, no DB service.
-- Spoolman has no auth. Tailnet-only via Tailscale ingress, no LAN VIP.
+- Spoolman has no auth. LAN VIP only (10.10.1.63), never off the local network.
 - Measured ~107 MiB idle, one uvicorn process. FilaMan used ~377 MiB, ten.
 - Nightly CronJob snapshots to NFS. WAL mode forbids plain file copies.
 """
@@ -34,8 +34,12 @@ SPOOLMAN_UID = 1000
 # Holds spoolman.db. Upstream warns if this is not a mounted volume.
 SPOOLMAN_DATA_DIR = "/home/app/.local/share/spoolman"
 SPOOLMAN_DATA_SIZE = "1Gi"
-# Tailnet name -> http://spoolman/. Also turns on Spoolman's host guard.
-SPOOLMAN_TAILNET_HOST = "spoolman"
+# kube-vip LoadBalancer VIP (static), local network only. Taken: .60 traefik,
+# .62 paseo, .90 ghost, .91 vints, .99 control-plane; pool is .61-.80.
+SPOOLMAN_LB_IP = "10.10.1.63"
+# Spoolman's DNS-rebinding guard. The VIP literal is allowed anyway, but naming it
+# keeps the log honest and lets a future DNS name be added in one place.
+SPOOLMAN_ALLOWED_HOST = SPOOLMAN_LB_IP
 # Same NFS export as vints; own subdir so the two prune independently.
 SPOOLMAN_NFS_SERVER = "10.10.1.101"  # host serving the backup export
 SPOOLMAN_NFS_PATH = "/pvebackup/spoolman"
@@ -45,7 +49,7 @@ SPOOLMAN_BACKUP_KEEP = 7
 
 
 def register(namespace):
-    """Create PVC, Deployment, tailnet Service and backup CronJob.
+    """Create PVC, Deployment, LAN Service and backup CronJob.
 
     `namespace` is owned by __main__.py. Infra ordering is PKO `spec.prerequisites`.
     """
@@ -98,7 +102,7 @@ def register(namespace):
                                 {"name": "PGID", "value": str(SPOOLMAN_UID)},
                                 {
                                     "name": "SPOOLMAN_ALLOWED_HOSTS",
-                                    "value": SPOOLMAN_TAILNET_HOST,
+                                    "value": SPOOLMAN_ALLOWED_HOST,
                                 },
                             ],
                             ports=[
@@ -155,21 +159,15 @@ def register(namespace):
         opts=pulumi.ResourceOptions(depends_on=[namespace, spoolman_storage]),
     )
 
-    # Tailscale L3 ingress: proxy joins tailnet as `spoolman`. No kube-vip VIP.
+    # LAN LoadBalancer on a static kube-vip VIP. No Tailscale: Spoolman is
+    # local-network only, so it takes a VIP from the pool instead of an ingress.
     spoolman_service = k8s.core.v1.Service(
         "spoolman",
-        metadata=ObjectMetaArgs(
-            name="spoolman",
-            namespace=NAMESPACE,
-            annotations={
-                "tailscale.com/expose": "true",
-                "tailscale.com/hostname": SPOOLMAN_TAILNET_HOST,
-            },
-        ),
+        metadata=ObjectMetaArgs(name="spoolman", namespace=NAMESPACE),
         spec=k8s.core.v1.ServiceSpecArgs(
             selector={"app": "spoolman"},
             type="LoadBalancer",
-            load_balancer_class="tailscale",
+            load_balancer_ip=SPOOLMAN_LB_IP,
             ports=[
                 k8s.core.v1.ServicePortArgs(
                     name="http",
