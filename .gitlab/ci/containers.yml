@@ -36,6 +36,22 @@ check:vints-mods:
       ' renovate.json > /dev/null
       pulumi/my-apps/containers/server/entrypoints/resolve-vints-mods.sh \
         --check --mods pulumi/my-apps/containers/server/vintagestory-mods.yaml
+# Spoolman snapshot script self-test. Script ships as a ConfigMap, so no build --
+# only behaviour. Case 1 is the point: a live WAL DB must snapshot the newest
+# commits, which a naive copy of spoolman.db does not while looking valid.
+check:spoolman-backup:
+  stage: test
+  image: python:3.13-slim
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "push"
+      changes:
+        - pulumi/my-apps/pod-scripts/spoolman-backup.py
+        - pulumi/my-apps/pod-scripts/test-spoolman-backup.py
+        - pulumi/my-apps/spoolman.py
+        - .gitlab/ci/containers.yml
+    - when: never
+  script:
+    - python3 pulumi/my-apps/pod-scripts/test-spoolman-backup.py
 
 build:vints:
   stage: build
