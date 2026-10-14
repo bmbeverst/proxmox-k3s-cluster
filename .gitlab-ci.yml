@@ -46,7 +46,9 @@ keepalive:renovate:
   stage: test
   image: alpine:3.22
   script:
-    - echo "renovate branch: nothing to build"
+    # Single-quoted so YAML keeps it a string; unquoted, the `: ` inside the
+    # echo makes YAML parse it as a mapping and GitLab rejects the config.
+    - 'echo "renovate branch: nothing to build"'
   rules:
     - if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH =~ /^renovate\//
 
