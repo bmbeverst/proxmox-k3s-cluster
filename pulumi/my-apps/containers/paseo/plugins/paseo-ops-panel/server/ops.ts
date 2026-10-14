@@ -12,6 +12,13 @@ const GUARD_BIN =
 const EXIT_MARK = "__OPS_EXIT_";
 const EXIT_RE = new RegExp(`${EXIT_MARK}(\\d+)__`);
 
+/** How long to wait for the exit sentinel before giving up on a command. */
+const CAPTURE_TIMEOUT_MS = 5 * 60 * 1000;
+/** Poll quickly at first so git/guard commands feel instant, then back off for long ones. */
+const FAST_POLL_MS = 250;
+const SLOW_POLL_MS = 1000;
+const FAST_POLL_WINDOW_MS = 1000;
+
 type CommandSpec = { label: string; shell: string };
 
 const COMMANDS: Record<string, CommandSpec> = {
@@ -19,13 +26,19 @@ const COMMANDS: Record<string, CommandSpec> = {
   "git-fetch": { label: "git fetch --prune", shell: "git fetch --prune" },
   "git-pull": { label: "git pull --ff-only", shell: "git pull --ff-only" },
   "git-push": { label: "git push", shell: "git push" },
+  // `-s dev` and `--non-interactive` are both load-bearing. Nothing selects a stack in the pod
+  // (PKO runs the stack with the project dir as its repoDir and never writes a `.pulumi/`
+  // workspace), so a bare `pulumi preview` blocks on the "Please choose a stack" selector: these
+  // commands run in a PTY, which Pulumi treats as interactive. `--non-interactive` fails fast
+  // instead of prompting for anything else the CLI may want (e.g. a missing provider plugin).
+  // `dev` is the stack PKO deploys (bmbeverst/my-apps/dev, bmbeverst/infra-apps/dev).
   "preview-my-apps": {
     label: "pulumi preview (my-apps)",
-    shell: "cd pulumi/my-apps && pulumi preview",
+    shell: "cd pulumi/my-apps && pulumi preview --non-interactive -s dev",
   },
   "preview-infra-apps": {
     label: "pulumi preview (infra-apps)",
-    shell: "cd pulumi/infra-apps && pulumi preview",
+    shell: "cd pulumi/infra-apps && pulumi preview --non-interactive -s dev",
   },
 };
 
@@ -44,13 +57,22 @@ async function runInTerminal(paseo: PaseoApi, workspaceId: string, shell: string
   });
 
   let lines: string[] = [];
-  for (let attempt = 0; attempt < 40; attempt += 1) {
-    await delay(150);
-    const captured = await terminal.capture({ stripAnsi: true });
-    lines = captured.lines;
-    if (lines.some((line) => EXIT_RE.test(line))) break;
+  try {
+    const deadline = Date.now() + CAPTURE_TIMEOUT_MS;
+    let nextPoll = FAST_POLL_MS;
+    while (Date.now() < deadline) {
+      await delay(nextPoll);
+      const captured = await terminal.capture({ stripAnsi: true });
+      lines = captured.lines;
+      if (lines.some((line) => EXIT_RE.test(line))) break;
+      // A preview refreshes every resource and takes minutes; a git command answers in
+      // milliseconds. Poll fast enough for the latter without hammering the daemon for the former.
+      if (Date.now() - (deadline - CAPTURE_TIMEOUT_MS) > FAST_POLL_WINDOW_MS) nextPoll = SLOW_POLL_MS;
+    }
+  } finally {
+    // Also on a capture error: the wrapper's trailing `sleep` would otherwise hold the PTY open.
+    await terminal.kill();
   }
-  await terminal.kill();
 
   const exitIndex = lines.findIndex((line) => EXIT_RE.test(line));
   const match = exitIndex >= 0 ? EXIT_RE.exec(lines[exitIndex]) : null;
