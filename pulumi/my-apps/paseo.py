@@ -257,6 +257,12 @@ def register(namespace):
                                 {"name": "PASEO_REPOS", "value": " ".join(PASEO_REPOS)},
                                 *_paseo_git_env(_paseo_git_token),
                             ],
+                            # Whole phase measures 12s for two ~50MB clones, so the request only
+                            # keeps the container off BestEffort.
+                            resources=k8s.core.v1.ResourceRequirementsArgs(
+                                requests={"cpu": "100m", "memory": "128Mi"},
+                                limits={"cpu": "1000m", "memory": "512Mi"},
+                            ),
                             security_context=k8s.core.v1.SecurityContextArgs(
                                 run_as_user=0,
                                 run_as_non_root=False,
@@ -332,8 +338,10 @@ def register(namespace):
                                 failure_threshold=3,
                                 timeout_seconds=5,
                             ),
+                            # Measured 1.2Gi working set / 1.54Gi cgroup peak, so a 1Gi request left
+                            # the pod running above its request and first in the eviction queue.
                             resources=k8s.core.v1.ResourceRequirementsArgs(
-                                requests={"cpu": "250m", "memory": "1Gi"},
+                                requests={"cpu": "250m", "memory": "1536Mi"},
                                 limits={"cpu": "2000m", "memory": "2Gi"},
                             ),
                             security_context=k8s.core.v1.SecurityContextArgs(
