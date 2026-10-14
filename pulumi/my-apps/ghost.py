@@ -84,6 +84,16 @@ def register(namespace):
         metadata=ObjectMetaArgs(name="ghost", namespace=NAMESPACE),
         spec=k8s.apps.v1.DeploymentSpecArgs(
             replicas=1,
+            # One replica on a ReadWriteOnce volume: delete-then-create, never two
+            # writers. The default surge=1 leaves the replacement Pending on
+            # FailedAttachVolume ("already used by pod"), because the old pod
+            # cannot release the volume until the new one is ready.
+            strategy=k8s.apps.v1.DeploymentStrategyArgs(
+                type="RollingUpdate",
+                rolling_update=k8s.apps.v1.RollingUpdateDeploymentArgs(
+                    max_surge=0, max_unavailable=1
+                ),
+            ),
             selector=k8s.meta.v1.LabelSelectorArgs(match_labels={"app": "ghost"}),
             template=k8s.core.v1.PodTemplateSpecArgs(
                 metadata=ObjectMetaArgs(labels={"app": "ghost"}),
