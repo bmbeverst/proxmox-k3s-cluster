@@ -19,9 +19,41 @@ GHOST_IMAGE = f"ghost:{_versions['ghost_image_tag']}"
 NAMESPACE = "ghost"
 
 # One canonical URL for Ghost, served through the kube-vip LoadBalancer VIP.
-GHOST_NODE = "node3"
 GHOST_LB_IP = "10.10.1.90"
 GHOST_URL = f"http://{GHOST_LB_IP}"
+
+# The nodes holding a diskful ghost-content replica, read from LINSTOR
+# (`linstor rd ... resources`: node2 and node3 hold the disk, node1 is the
+# tiebreaker). Revisit if the volume is ever re-placed.
+GHOST_PREFERRED_NODES = ["node2", "node3"]
+
+
+def _ghost_preferred_nodes():
+    """Prefer the nodes holding a diskful ghost-content replica, without pinning.
+
+    A hard nodeSelector used to pin Ghost to node3 alone, so a node loss left it
+    unschedulable and the choice went stale whenever LINSTOR re-placed the
+    replicas. Preferred affinity keeps the local-disk bias while still letting
+    the pod move (e.g. a kured reboot).
+    """
+    return k8s.core.v1.AffinityArgs(
+        node_affinity=k8s.core.v1.NodeAffinityArgs(
+            preferred_during_scheduling_ignored_during_execution=[
+                k8s.core.v1.PreferredSchedulingTermArgs(
+                    weight=100,
+                    preference=k8s.core.v1.NodeSelectorTermArgs(
+                        match_expressions=[
+                            k8s.core.v1.NodeSelectorRequirementArgs(
+                                key="kubernetes.io/hostname",
+                                operator="In",
+                                values=GHOST_PREFERRED_NODES,
+                            ),
+                        ],
+                    ),
+                ),
+            ],
+        ),
+    )
 
 
 def register(namespace):
@@ -109,7 +141,7 @@ def register(namespace):
                             ],
                         ),
                     ],
-                    node_selector={"kubernetes.io/hostname": GHOST_NODE},
+                    affinity=_ghost_preferred_nodes(),
                     volumes=[
                         k8s.core.v1.VolumeArgs(
                             name="ghost-content",
