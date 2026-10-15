@@ -57,9 +57,10 @@ else
   exit 0
 fi
 
-# Note: the tools read the working tree, not the index. A file staged and then
-# edited without re-staging is therefore judged on its newest content - the same
-# tradeoff the pre-commit framework makes.
+# Note: the tools read the working tree, not the index, so a file staged and then
+# edited without re-staging is judged on its newest content. pre-commit instead
+# stashes unstaged changes to check exactly what is staged; that is safer, but it
+# needs its own per-clone install and refuses to run while core.hooksPath is set.
 status=0
 lint_tool black --check || status=1
 lint_tool isort --check-only || status=1
