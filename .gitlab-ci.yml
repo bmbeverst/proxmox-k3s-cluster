@@ -23,8 +23,32 @@ include:
   # Container build + scan jobs live here to keep the root pipeline lean.
   - local: .gitlab/ci/containers.yml
 
+# Hooks are local config (core.hooksPath) and Git never clones them, so enable
+# them once per clone with `make hooks` (see README).
+
 variables:
   SECRET_DETECTION_ENABLED: "true"
+
+# Same checks as the local pre-commit hook, but authoritative: the hook is
+# opt-in per clone, so CI is what actually gates a merge.
+lint:python:
+  stage: test
+  image: python:3.13-slim
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "push"
+      changes:
+        - "**/*.py"
+        - pyproject.toml
+        - uv.lock
+        - .gitlab-ci.yml
+    - when: never
+  script:
+    # Only the lint group: the Pulumi SDKs are not needed to check formatting,
+    # and --frozen fails on uv.lock drift instead of silently re-locking.
+    - pip install --quiet uv
+    - uv sync --only-group lint --frozen
+    - uv run --frozen --only-group lint isort --check-only --diff .
+    - uv run --frozen --only-group lint black --check --diff .
 
 # SAST runs only on the "weekly SAST" pipeline schedule, never on a push.
 semgrep-sast:

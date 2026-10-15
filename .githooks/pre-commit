@@ -1,0 +1,73 @@
+#!/bin/sh
+# Pre-commit: keep black and isort green on every commit.
+#
+# Git never clones hooks, so this is enabled per clone via `core.hooksPath`
+# (see README):
+#
+#     make hooks        # or: git config core.hooksPath .githooks
+#
+# Only staged Python that survives the commit is checked (ACMR: added, copied,
+# modified, renamed) - a deleted file cannot fail a linter. Both tools run in
+# --check mode, so the hook never rewrites the index behind your back.
+set -eu
+
+# Hooks run from the repo root for a plain `git commit`, but not for every
+# invocation (`git -C dir commit`), so resolve the root instead of trusting $PWD.
+root="$(git rev-parse --show-toplevel)"
+cd "$root"
+
+# -z + xargs -0 keeps paths with spaces in one piece; the list goes through a
+# temp file because a shell variable cannot hold NUL.
+list="$(mktemp)"
+trap 'rm -f "$list"' EXIT INT TERM
+git diff --cached --name-only --diff-filter=ACMR -z -- '*.py' >"$list"
+if [ ! -s "$list" ]; then
+  exit 0
+fi
+
+# Prefer the project venv: it already holds the pinned lint group and needs no
+# network. Otherwise let uv resolve it from uv.lock. With neither, skip instead of
+# blocking the commit - the hook exists to catch formatting drift, not to make
+# the repo uncommittable in a container that lacks the toolchain.
+#
+# The tool is invoked through a helper rather than stored in a variable: xargs
+# execs a program directly, so it cannot call a shell function, and an unquoted
+# "uv run --group lint black" would be split by word rather than argument.
+if [ -x "$root/.venv/bin/black" ] && [ -x "$root/.venv/bin/isort" ]; then
+  lint_tool() {
+    tool="$1"
+    shift
+    xargs -0 "$root/.venv/bin/$tool" "$@" <"$list"
+  }
+elif command -v uv >/dev/null 2>&1; then
+  lint_tool() {
+    tool="$1"
+    shift
+    xargs -0 uv run --quiet --only-group lint "$tool" "$@" <"$list"
+  }
+  # Probe once before checking anything: `uv run` exits 2 when the tool or the
+  # environment cannot be resolved (no project, no network, uv.lock stale). That
+  # is a missing toolchain, not a lint failure, so skip rather than block.
+  if ! lint_tool black --version >/dev/null 2>&1; then
+    echo "pre-commit: uv cannot resolve the lint group, skipping black/isort" >&2
+    exit 0
+  fi
+else
+  echo "pre-commit: no .venv and no uv, skipping black/isort" >&2
+  exit 0
+fi
+
+# Note: the tools read the working tree, not the index. A file staged and then
+# edited without re-staging is therefore judged on its newest content - the same
+# tradeoff the pre-commit framework makes.
+status=0
+lint_tool black --check || status=1
+lint_tool isort --check-only || status=1
+
+if [ "$status" -ne 0 ]; then
+  # Both forms, because the pod (where the agent commits) has no `make`.
+  echo "pre-commit: fix and re-stage, e.g." >&2
+  echo "  make lint" >&2
+  echo "  uv run --only-group lint isort . && uv run --only-group lint black ." >&2
+fi
+exit "$status"

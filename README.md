@@ -8,6 +8,29 @@ You need to include the lint and infra groups for dependencies.
 
 Also if coming back after python was updated redo the .venv with `uv venv` `source .venv/bin/activate` `uv sync --active --group lint`
 
+### Lint
+
+Formatting is black + isort, both configured in `pyproject.toml`
+(`[tool.isort]` uses `profile = "black"`, so the two never fight).
+
+```bash
+make lint        # rewrite files in place
+make lint-check  # what the hook and CI run: report only, touch nothing
+```
+
+Git hooks are not cloned, so enable the pre-commit hook once per clone:
+
+```bash
+make hooks       # git config core.hooksPath .githooks
+```
+
+It runs `black --check` and `isort --check-only` over the staged Python files and
+blocks the commit on failure. It uses `.venv` when present and falls back to
+`uv run --only-group lint`; with neither available (or a uv environment that
+cannot resolve) it skips rather than blocking.
+CI (`.gitlab-ci.yml`) runs the same two checks, so a clone without hooks still
+cannot merge unformatted code.
+
 ## Components
 
 ### Flatcar

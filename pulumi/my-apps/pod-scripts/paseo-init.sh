@@ -26,6 +26,13 @@ for URL in $PASEO_REPOS; do
     # The remote stays tokenless on disk; insteadOf adds the credential at use time.
     git -C "$repo" remote set-url origin "$URL" \
       || echo "ERROR: could not set the remote for $repo" >&2
+    # Enable the repo's own hooks: core.hooksPath is local config, so a clone
+    # starts without them. That is what keeps the agent's commits black/isort
+    # clean; uv is in the image, so the hook's fallback path works here.
+    if [ -x "$repo/.githooks/pre-commit" ]; then
+      git -C "$repo" config core.hooksPath .githooks \
+        || echo "ERROR: could not enable hooks in $repo" >&2
+    fi
     chown -R "$PASEO_OWNER" "$repo"
   fi
 done
