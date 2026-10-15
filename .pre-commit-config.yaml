@@ -1,0 +1,23 @@
+# Hook runner for black + isort. The tools themselves come from the `lint` group
+# in pyproject.toml/uv.lock, so there is no second version pin to keep in sync and
+# nothing for Renovate's (opt-in, beta) pre-commit manager to update.
+#
+# `repo: local` + `language: system` because the pinned toolchain is already
+# installable with `uv run --only-group lint ...`. The canonical
+# `psf/black` / `pycqa/isort` hook repos would pin a *second* copy of each tool
+# with its own `rev:`, which is exactly the drift this avoids.
+repos:
+  - repo: local
+    hooks:
+      # No --check/--diff: both hooks format in place and then fail, so a bad
+      # commit is stopped with the fix already applied. Re-stage and commit again.
+      - id: isort
+        name: isort
+        entry: uv run --only-group lint isort
+        language: system
+        types: [python]
+      - id: black
+        name: black
+        entry: uv run --only-group lint black
+        language: system
+        types: [python]

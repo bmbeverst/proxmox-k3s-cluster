@@ -29,8 +29,9 @@ include:
 variables:
   SECRET_DETECTION_ENABLED: "true"
 
-# Same checks as the local pre-commit hook, but authoritative: the hook is
-# opt-in per clone, so CI is what actually gates a merge.
+# Same hooks as the local pre-commit install, run by the same runner, so CI
+# cannot drift from a developer's run. There is no hosted pre-commit.ci for
+# GitLab (it is GitHub-only), so the framework runs here directly.
 lint:python:
   stage: test
   image: python:3.13-slim
@@ -38,17 +39,24 @@ lint:python:
     - if: $CI_PIPELINE_SOURCE == "push"
       changes:
         - "**/*.py"
+        - .pre-commit-config.yaml
         - pyproject.toml
         - uv.lock
         - .gitlab-ci.yml
     - when: never
+  variables:
+    # pre-commit caches hook environments here; keep them inside the checkout.
+    PRE_COMMIT_HOME: "$CI_PROJECT_DIR/.cache/pre-commit"
   script:
-    # Only the lint group: the Pulumi SDKs are not needed to check formatting,
-    # and --frozen fails on uv.lock drift instead of silently re-locking.
+    # python:3.13-slim has neither git (pre-commit requires it) nor uv.
+    - apt-get update && apt-get install -y --no-install-recommends git
     - pip install --quiet uv
+    # Only the lint group: the Pulumi SDKs are not needed to run the hooks, and
+    # --frozen fails on uv.lock drift instead of silently re-locking.
     - uv sync --only-group lint --frozen
-    - uv run --frozen --only-group lint isort --check-only --diff .
-    - uv run --frozen --only-group lint black --check --diff .
+    # Hooks fix files in place and then fail, so a formatting error surfaces as a
+    # diff in the job log; nothing is pushed back.
+    - uv run --frozen --only-group lint pre-commit run --all-files --show-diff-on-failure
 
 # SAST runs only on the "weekly SAST" pipeline schedule, never on a push.
 semgrep-sast:

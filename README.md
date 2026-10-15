@@ -10,26 +10,29 @@ Also if coming back after python was updated redo the .venv with `uv venv` `sour
 
 ### Lint
 
-Formatting is black + isort, both configured in `pyproject.toml`
-(`[tool.isort]` uses `profile = "black"`, so the two never fight).
+Formatting is black + isort, configured in `pyproject.toml` (`[tool.isort]` uses
+`profile = "black"`, so the two never fight) and run through
+[pre-commit](https://pre-commit.com) — see `.pre-commit-config.yaml`.
+
+Git hooks are local state, so enable them once per clone:
 
 ```bash
-make lint        # rewrite files in place
-make lint-check  # what the hook and CI run: report only, touch nothing
+make hooks       # uv run --only-group lint pre-commit install
 ```
-
-Git hooks are not cloned, so enable the pre-commit hook once per clone:
 
 ```bash
-make hooks       # git config core.hooksPath .githooks
+make lint        # run the hooks over every file
+make lint-ci     # exactly what CI runs
 ```
 
-It runs `black --check` and `isort --check-only` over the staged Python files and
-blocks the commit on failure. It uses `.venv` when present and falls back to
-`uv run --only-group lint`; with neither available (or a uv environment that
-cannot resolve) it skips rather than blocking.
-CI (`.gitlab-ci.yml`) runs the same two checks, so a clone without hooks still
-cannot merge unformatted code.
+The hooks fix files in place and then fail, so a failing commit leaves the
+correction applied — re-stage and commit again. They check what is *staged*, not
+your working tree, so unrelated edits in progress are stashed and restored.
+
+The hook definitions use `repo: local` with the tools from the `lint` group in
+`pyproject.toml`/`uv.lock`, so there is no second `rev:` pin to keep in sync.
+CI (`.gitlab-ci.yml`) runs the same `pre-commit run --all-files`, so a clone
+without hooks still cannot merge unformatted code.
 
 ## Components
 
