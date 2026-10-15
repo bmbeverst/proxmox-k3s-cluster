@@ -13,6 +13,21 @@ dependencies = [
 [tool.uv]
 link-mode = "symlink"
 
+[tool.isort]
+# Match black so the two never fight over the same lines (line length, multi-line
+# import wrapping, magic trailing comma).
+profile = "black"
+# The Pulumi programs and the pyinfra deploy scripts live in `pulumi/` and
+# `pyinfra/` at the repo root, so those names also exist as directories. Without
+# this, isort treats the *installed* `pulumi` package as first-party while
+# `pulumi_kubernetes`/`pulumi_proxmoxve` (separate dists) stay third-party, which
+# splits one SDK block into two and reorders it. Pin them to third-party.
+known_third_party = ["pulumi", "pyinfra"]
+# Sibling modules imported by pulumi/my-apps/__main__.py (ghost, paseo, spoolman,
+# vintagestory). Taking the directory as a source root keeps them first-party
+# without listing names here, so a new app module is classified automatically.
+src_paths = ["pulumi/my-apps"]
+
 [dependency-groups]
 infra = [
     "pyinfra>=3.2",

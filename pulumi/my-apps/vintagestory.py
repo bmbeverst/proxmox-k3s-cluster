@@ -13,12 +13,11 @@ import base64
 import json
 import os
 
-import yaml
-
 import pulumi
 import pulumi_kubernetes as k8s
 import pulumi_kubernetes.batch as k8s_batch  # for the backup CronJob
 import pulumi_kubernetes.rbac as k8s_rbac  # for the backup CronJob's RBAC
+import yaml
 from pulumi_kubernetes.meta.v1 import ObjectMetaArgs
 
 with open(os.path.join(os.path.dirname(__file__), "..", "versions.yaml")) as f:

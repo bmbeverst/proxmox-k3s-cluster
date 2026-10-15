@@ -1,17 +1,14 @@
 """These are the apps that are setup to run the cluster infrastructure"""
 
-from typing import Optional
 import os
+from typing import Optional
 
 import pulumi
 import pulumi_kubernetes as k8s
 import yaml
-
+from pulumi import ResourceOptions
 from pulumi_kubernetes.apiextensions import CustomResource
 from pulumi_kubernetes.yaml.v2 import ConfigFile
-
-from pulumi import ResourceOptions
-
 
 # The system-upgrade-controller release tag lives in ../versions.yaml (the only
 # non-Helm version there), bumped by Renovate's single regex customManager

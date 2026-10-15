@@ -15,11 +15,10 @@ import base64
 import json
 import os
 
-import yaml
-
 import pulumi
 import pulumi_kubernetes as k8s
 import pulumi_kubernetes.rbac as k8s_rbac  # read-only ClusterRole for in-cluster `pulumi preview`
+import yaml
 from pulumi_kubernetes.meta.v1 import ObjectMetaArgs
 
 with open(os.path.join(os.path.dirname(__file__), "..", "versions.yaml")) as f:

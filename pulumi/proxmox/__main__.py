@@ -1,7 +1,6 @@
-from typing import TypedDict
-
 import os
 import pathlib
+from typing import TypedDict
 
 import pulumi
 import pulumi_proxmoxve as proxmoxve

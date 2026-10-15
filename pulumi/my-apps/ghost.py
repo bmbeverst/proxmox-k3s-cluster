@@ -5,10 +5,9 @@
 
 import os
 
-import yaml
-
 import pulumi
 import pulumi_kubernetes as k8s
+import yaml
 from pulumi_kubernetes.meta.v1 import ObjectMetaArgs
 
 with open(os.path.join(os.path.dirname(__file__), "..", "versions.yaml")) as f:

@@ -4,15 +4,13 @@ import os
 import urllib.request
 
 import yaml
-
+from pulumi import Config, ResourceOptions
 from pulumi_kubernetes import core, rbac
 from pulumi_kubernetes.apiextensions import CustomResource
 from pulumi_kubernetes.apiextensions.v1 import CustomResourceDefinition
 from pulumi_kubernetes.core.v1 import Namespace, Secret
 from pulumi_kubernetes.helm.v3 import Release, ReleaseArgs
 from pulumi_kubernetes.meta.v1 import ObjectMetaArgs
-
-from pulumi import Config, ResourceOptions
 
 # Chart repo/version live in ../Chart.yaml so Renovate's built-in helmv3 manager
 # can bump the PKO chart version (the other charts live there too).
