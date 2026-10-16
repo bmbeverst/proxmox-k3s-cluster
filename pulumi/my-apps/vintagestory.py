@@ -288,8 +288,8 @@ def register(namespace):
                                 ),
                             ],
                             resources=k8s.core.v1.ResourceRequirementsArgs(
-                                requests={"cpu": "1000m", "memory": "2Gi"},
-                                limits={"cpu": "2000m", "memory": "3Gi"},
+                                requests={"cpu": "1000m", "memory": "3Gi"},
+                                limits={"cpu": "2000m", "memory": "4Gi"},
                             ),
                             readiness_probe=k8s.core.v1.ProbeArgs(
                                 tcp_socket=k8s.core.v1.TCPSocketActionArgs(
