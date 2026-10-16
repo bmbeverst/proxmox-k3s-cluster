@@ -11,3 +11,30 @@ sortablestorage: 3.0.0
 prospecttogether: 2.2.1
 smithingplus: 1.9.0-rc.1
 bedspawnv2: 1.7.1
+
+# In-game mod config/conflict UI; also a hard dependency of yangtransport (>= 1.1.2).
+integratedmodmanager: 1.1.3
+# Needed by the Phanerozoic dinosaur families and BetterRuins for their settings.
+configlib: 1.13.2
+# Draconis and its two required libraries.
+draconis: 1.6.1
+jaunt: 3.3.1
+attributerenderinglibrary: 3.2.0
+# Yang's Transport Tycoon and its two required libraries.
+yangtransport: 1.0.4
+collisionflowfields: 1.2.2
+evilinteractionrangehack: 6.9.0
+fromgoldencombs: 2.1.0
+japanesearchitecture: 0.9.7
+practicalelectricity: 0.9.23
+betterruins: 0.6.4
+# Wool & More requires ShearLib.
+wool: 1.9.6
+shearlib: 1.3.0
+darcesdriftersredone: 1.3.0
+# Legacy of the Phanerozoic (forked): the runtime plus one entry per dinosaur family.
+dinocore: 2.0.0
+lopustegosauria: 2.0.0
+lopumacronaria: 2.0.0
+lopuceratopsidae: 2.0.0
+lopudromaeosauridae: 2.0.0
