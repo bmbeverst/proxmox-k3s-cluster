@@ -207,6 +207,36 @@ api_version_release() {
 }
 
 # --- artifacts ---------------------------------------------------------------
+# jq is strict JSON; VS's own parser (Newtonsoft) tolerates a trailing comma before } or ], and a mod
+# the game happily loads must not be unstaginable. Only a comma outside a string, followed by nothing
+# but whitespace and a closing brace/bracket, is dropped; anything else still fails the reads below.
+# POSIX awk only (the image's awk is Debian's, not gawk), so the file is slurped with getline rather
+# than RS="" paragraph mode, and /dev/null keeps awk from reading stdin.
+strip_trailing_commas() {  # <file> -> stdout
+  awk -v file="$1" '
+  BEGIN {
+    while ((getline line < file) > 0) s = s line "\n"
+    close(file)
+    out = ""; instr = 0
+    for (i = 1; i <= length(s); i++) {
+      c = substr(s, i, 1)
+      if (instr) {
+        if (c == "\\") { out = out c substr(s, i + 1, 1); i++; continue }
+        if (c == "\"") instr = 0
+        out = out c; continue
+      }
+      if (c == "\"") { instr = 1; out = out c; continue }
+      if (c == ",") {
+        k = i + 1
+        while (k <= length(s) && substr(s, k, 1) ~ /[ \t\r\n]/) k++
+        if (k <= length(s) && (substr(s, k, 1) == "}" || substr(s, k, 1) == "]")) continue
+      }
+      out = out c
+    }
+    print out
+  }' /dev/null
+}
+
 # Reads the zip's modinfo.json into MODINFO_MODID / MODINFO_VERSION and asserts what every artifact
 # must satisfy: a plain modid, and, if it declares one, a game dependency the image can satisfy.
 read_modinfo() {
@@ -215,11 +245,17 @@ read_modinfo() {
     rm -f "$WORK/modinfo.json"
     fail "$ctx: no readable modinfo.json at the zip root"
   fi
-  MODINFO_MODID="$(jq -r '.modid // empty' "$WORK/modinfo.json")"
-  MODINFO_VERSION="$(jq -r '.version // empty' "$WORK/modinfo.json")"
-  dep="$(jq -r '.dependencies.game? // empty' "$WORK/modinfo.json")"
+  # One sanitize for every read below, so a tolerated trailing comma cannot hide a real parse error and
+  # an unparseable file still fails loudly instead of aborting the script with jq's own exit code.
+  if ! jq -e . "$WORK/modinfo.json" > /dev/null 2>&1; then
+    strip_trailing_commas "$WORK/modinfo.json" > "$WORK/modinfo.json.fixed"
+    mv "$WORK/modinfo.json.fixed" "$WORK/modinfo.json"
+  fi
+  MODINFO_MODID="$(jq -r '.modid // empty' "$WORK/modinfo.json" 2>/dev/null || true)"
+  MODINFO_VERSION="$(jq -r '.version // empty' "$WORK/modinfo.json" 2>/dev/null || true)"
+  dep="$(jq -r '.dependencies.game? // empty' "$WORK/modinfo.json" 2>/dev/null || true)"
   rm -f "$WORK/modinfo.json"
-  [[ -n "$MODINFO_MODID" ]] || fail "$ctx: modinfo.json carries no modid"
+  [[ -n "$MODINFO_MODID" ]] || fail "$ctx: modinfo.json is not readable JSON or carries no modid"
   [[ "$MODINFO_MODID" =~ ^[A-Za-z0-9_.-]+$ ]] \
     || fail "$ctx: modinfo.json modid '$MODINFO_MODID' is not a plain id"
   if [[ -n "$dep" ]]; then
