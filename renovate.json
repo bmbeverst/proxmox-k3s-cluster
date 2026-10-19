@@ -120,6 +120,18 @@
         "custom.vintagestory_mod_1_22"
       ],
       "minimumReleaseAge": null
+    },
+    {
+      "description": "Stratum: stable 'stratum.<n>' releases only (never -indev), its own MR, never automerged - the sha256 pin beside it has to be refreshed by hand",
+      "matchDatasources": [
+        "github-releases"
+      ],
+      "matchDepNames": [
+        "StratumServer/Stratum"
+      ],
+      "allowedVersions": "/^\\d+\\.\\d+\\.\\d+-stratum\\.\\d+$/",
+      "groupName": null,
+      "automerge": false
     }
   ],
   "customManagers": [

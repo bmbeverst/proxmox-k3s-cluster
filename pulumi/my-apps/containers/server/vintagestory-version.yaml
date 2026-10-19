@@ -13,8 +13,10 @@
 # renovate: datasource=custom.custom-vintagestory depName=vintagestory
 vintagestory_version: 1.22.7
 
-# Stratum release, deliberately NOT Renovate-managed: the tags read `v<vs>-stratum.<rev>` (a semver
-# prerelease), and the release zip has no published digest file, so a bump has to bring its own sha256.
-# Bump both lines together; a stale digest fails the build at the `sha256sum -c` step.
+# Stratum release. Renovate proposes bumps as their own MR and never automerges them: the tags are
+# semver prereleases whose only stable shape is `<game>-stratum.<n>` (every `-indev` build is filtered
+# out by renovate.json), and the release zip has no digest file, so the bump arrives tag-only and
+# `stratum_sha256` has to be refreshed by hand. A stale digest fails the build at `sha256sum -c`.
+# renovate: datasource=github-releases depName=StratumServer/Stratum
 stratum_version: v1.22.7-stratum.2
 stratum_sha256: 15de27a4600ae919d446bb04d56700cce687724b6dd9307dcea02d83b4f18a96
