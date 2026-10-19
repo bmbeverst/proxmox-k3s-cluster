@@ -78,26 +78,24 @@ build:vints:
         pulumi/my-apps/containers/server/vintagestory-version.yaml)
       printf '%s' "$VS_VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' \
         || { echo "FATAL: vintagestory_version in containers/server/vintagestory-version.yaml is not X.Y.Z"; exit 1; }
+      VERS=pulumi/my-apps/containers/server/vintagestory-version.yaml
+      STRATUM_VERSION=$(sed -n 's/^stratum_version:[[:space:]]*//p' "$VERS")
+      STRATUM_SHA256=$(sed -n 's/^stratum_sha256:[[:space:]]*//p' "$VERS")
+      [ -n "$STRATUM_VERSION" ] && [ -n "$STRATUM_SHA256" ] \
+        || { echo "FATAL: stratum_version/stratum_sha256 missing from $VERS"; exit 1; }
+      # Stratum's launcher resolves the vanilla archive itself, so only assert the pinned game version
+      # exists upstream: a bad pin should fail here, not after the install download inside the build.
       VS_INDEX="https://api.vintagestory.at/stable-unstable.json"
-      VS_JSON=$(curl -fsSL --retry 3 "$VS_INDEX") \
-        || { echo "FATAL: could not fetch $VS_INDEX"; exit 1; }
-      VS_URL=$(printf '%s' "$VS_JSON" | jq -r --arg v "$VS_VERSION" '.[$v].linuxserver.urls.cdn? // empty')
-      VS_MD5=$(printf '%s' "$VS_JSON" | jq -r --arg v "$VS_VERSION" '.[$v].linuxserver.md5? // empty')
-      case "$VS_URL" in
-        https://*) ;;
-        *) echo "FATAL: VS $VS_VERSION has no https CDN url in the index (got '$VS_URL')"; exit 1 ;;
-      esac
-      printf '%s' "$VS_MD5" | grep -Eq '^[0-9a-f]{32}$' \
-        || { echo "FATAL: VS $VS_VERSION has no md5 in the index (got '$VS_MD5')"; exit 1; }
+      curl -fsSL --retry 3 "$VS_INDEX" | jq -e --arg v "$VS_VERSION" '.[$v]' > /dev/null \
+        || { echo "FATAL: Vintage Story $VS_VERSION is not in $VS_INDEX"; exit 1; }
 
-      echo "Building $REPO:$FULL_TAG (track ${MAJOR}.${MINOR}) baking Vintage Story $VS_VERSION"
-      echo "  artifact $VS_URL (md5 $VS_MD5)"
+      echo "Building $REPO:$FULL_TAG (track ${MAJOR}.${MINOR}) with Stratum $STRATUM_VERSION over Vintage Story $VS_VERSION"
       # --layers keeps base/apt/game separate so the registry dedupes everything unchanged instead of
       # storing a fresh squashed blob per tag (see the Dockerfile's mtime pinning).
       buildah build --layers --storage-driver=vfs --isolation=chroot \
         --build-arg "VS_VERSION=$VS_VERSION" \
-        --build-arg "VS_URL=$VS_URL" \
-        --build-arg "VS_MD5=$VS_MD5" \
+        --build-arg "STRATUM_VERSION=$STRATUM_VERSION" \
+        --build-arg "STRATUM_SHA256=$STRATUM_SHA256" \
         --tag "$REPO:$FULL_TAG" \
         --tag "$REPO:latest" \
         pulumi/my-apps/containers/server
@@ -336,21 +334,24 @@ smoke:vints:
       TAG="latest"
       IMG="$CI_REGISTRY_IMAGE/vints-server:$TAG"
       PINS=pulumi/my-apps/containers/server/vintagestory-mods.yaml
-      VS_VERSION=$(sed -n 's/^vintagestory_version:[[:space:]]*//p' \
-        pulumi/my-apps/containers/server/vintagestory-version.yaml)
+      VERS=pulumi/my-apps/containers/server/vintagestory-version.yaml
+      VS_VERSION=$(sed -n 's/^vintagestory_version:[[:space:]]*//p' "$VERS")
+      STRATUM_VERSION=$(sed -n 's/^stratum_version:[[:space:]]*//p' "$VERS")
       D=$(mktemp -d)
       mkdir -p "$D/data/Mods" "$D/config" "$D/empty"
       cp "$PINS" "$D/config/mods.yaml"
       PINS_COUNT=$(grep -c '^[^#[:space:]]' "$D/config/mods.yaml" || true)
-      echo "VS_VERSION=$VS_VERSION TAG=$TAG PINS=$PINS_COUNT"
+      echo "VS_VERSION=$VS_VERSION STRATUM=$STRATUM_VERSION TAG=$TAG PINS=$PINS_COUNT"
 
-      # 1) the tag promises this game version: assert the baked binaries agree
-      baked=$(podman run --rm "$IMG" \
-        /serverfiles/VintagestoryServer --version 2>/dev/null | tr -d '[:space:]' || true)
-      case "$baked" in
-        *"$VS_VERSION"*) echo "baked game version OK: $baked" ;;
-        *) die "image reports game version '$baked', pinned '$VS_VERSION'" ;;
-      esac
+      # 1) the tag promises this game version, served by this Stratum release
+      baked=$(podman run --rm "$IMG" /serverfiles/StratumServer --stratum-version 2>/dev/null \
+        | sed -n 's/^Base game: Vintage Story //p' | tr -d '[:space:]' || true)
+      [ "$baked" = "$VS_VERSION" ] \
+        || die "image prepares game '$baked', pinned '$VS_VERSION'"
+      label=$(podman image inspect --format '{{index .Config.Labels "com.proxmox-k3s.stratum"}}' "$IMG")
+      [ "$label" = "$STRATUM_VERSION" ] \
+        || die "image labels Stratum '$label', pinned '$STRATUM_VERSION'"
+      echo "baked game version OK: $baked (Stratum $STRATUM_VERSION)"
 
       # 1b) the marker an image only earns by pinning its layer mtimes; without that pinning every rebuild
       # re-uploads the game layer, which is what bloated the registry. Skipped for pre-fix images on purpose:
@@ -411,7 +412,7 @@ smoke:vints:
       # 6) generate config, then shrink the world so first boot reaches WorldReady fast
       podman run --rm -u 0 -e DATA_PATH=/data -e PORT=42420 \
         -v "$D/data":/data \
-        "$IMG" /bin/sh -c 'cd /serverfiles && ./VintagestoryServer --dataPath /data --genconfig >/dev/null 2>&1' \
+        "$IMG" /bin/sh -c 'cd /serverfiles && ./StratumServer --stratum-skip-bootstrap --dataPath /data --genconfig >/dev/null 2>&1' \
         || die "genconfig step failed"
       sed -i 's/"MapSizeX": [0-9][0-9]*/"MapSizeX": 512/; s/"MapSizeY": [0-9][0-9]*/"MapSizeY": 128/; s/"MapSizeZ": [0-9][0-9]*/"MapSizeZ": 512/' "$D/data/serverconfig.json"
 
@@ -438,6 +439,9 @@ smoke:vints:
         grep -i 'mods' "$D/boot.log" | head -5
         die "the game did not load $((PINS_COUNT + 3)) mods"
       fi
+      # the boot must be Stratum's, not a silent fallback to the vanilla launcher
+      grep -q "Stratum ${STRATUM_VERSION#v} for Vintage Story $VS_VERSION" "$D/boot.log" \
+        || { grep -i 'stratum' "$D/boot.log" | head -5; die "server did not boot as Stratum $STRATUM_VERSION"; }
       # a version pin's key is the mod's internal Mod ID, which the game logs in its load order
       # ("Mods, sorted by dependency: ..."); a URL pin's key is free-form, the count covers it
       while read -r key; do

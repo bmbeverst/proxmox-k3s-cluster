@@ -1,12 +1,20 @@
-# The Vintage Story version baked into the vints-server image at build time.
+# The Vintage Story and Stratum versions baked into the vints-server image at build time.
 #
-# CI resolves this version's https CDN artifact URL + published md5 from the official index
-# (https://api.vintagestory.at/stable-unstable.json) and the Dockerfile verifies both while it
-# extracts, so the image tag pins the exact game bytes and the running pod never downloads it.
+# The image runs Stratum, the patched server fork. Its launcher fetches the vanilla archive for
+# `vintagestory_version` through Anego's release manifest, verifies it, and patches the install during
+# `podman build`, so the image tag pins the exact game bytes and the running pod never downloads them.
+# CI still checks the pinned game version against https://api.vintagestory.at/stable-unstable.json before
+# building, and the Dockerfile asserts that the prepared install reports it.
 #
-# Renovate bumps this pin on new releases. It lives in the build context on purpose: a bump
+# Renovate bumps vintagestory_version on new releases. It lives in the build context on purpose: a bump
 # under pulumi/my-apps/containers/server/ is what triggers the build + smoke test, while
 # pulumi/versions.yaml stays Renovate's deploy pin so a tag bump cannot rebuild -> publish ->
 # bump -> rebuild forever.
 # renovate: datasource=custom.custom-vintagestory depName=vintagestory
 vintagestory_version: 1.22.7
+
+# Stratum release, deliberately NOT Renovate-managed: the tags read `v<vs>-stratum.<rev>` (a semver
+# prerelease), and the release zip has no published digest file, so a bump has to bring its own sha256.
+# Bump both lines together; a stale digest fails the build at the `sha256sum -c` step.
+stratum_version: v1.22.7-stratum.2
+stratum_sha256: 15de27a4600ae919d446bb04d56700cce687724b6dd9307dcea02d83b4f18a96

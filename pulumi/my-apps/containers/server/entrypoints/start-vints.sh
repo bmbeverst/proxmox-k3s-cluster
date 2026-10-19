@@ -2,6 +2,10 @@
 # Runs the Vintage Story dedicated server in the foreground (PID 1), so
 # Kubernetes owns lifecycle/restart/probes/logs. First run generates
 # serverconfig.json under $DATA_PATH.
+#
+# The server binary is Stratum, a patched protocol-compatible fork. Its install was prepared at image
+# build (--stratum-prepare-only), so --stratum-skip-bootstrap keeps a pod start offline: no manifest
+# read, no download, no re-patching. Every other flag is forwarded to the vanilla server core.
 set -euo pipefail
 cd /serverfiles
 
@@ -22,7 +26,7 @@ AUTOSAVE_SECONDS=900
 # Seed config
 if [[ ! -f "$DATA_PATH/serverconfig.json" ]]; then
   echo "[vints] no serverconfig.json found - generating default (--genconfig)"
-  ./VintagestoryServer --genconfig --dataPath "$DATA_PATH"
+  ./StratumServer --stratum-skip-bootstrap --genconfig --dataPath "$DATA_PATH"
 fi
 
 MAGIC="$DATA_PATH/servermagicnumbers.json"
@@ -39,4 +43,4 @@ if [[ "$_current_autosave" != "$AUTOSAVE_SECONDS" ]]; then
 fi
 
 # Start server
-exec ./VintagestoryServer --dataPath "$DATA_PATH" --port "$PORT" <&3
+exec ./StratumServer --stratum-skip-bootstrap --dataPath "$DATA_PATH" --port "$PORT" <&3
