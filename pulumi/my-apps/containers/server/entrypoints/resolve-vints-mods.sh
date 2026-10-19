@@ -258,8 +258,9 @@ read_modinfo() {
   [[ -n "$MODINFO_MODID" ]] || fail "$ctx: modinfo.json is not readable JSON or carries no modid"
   [[ "$MODINFO_MODID" =~ ^[A-Za-z0-9_.-]+$ ]] \
     || fail "$ctx: modinfo.json modid '$MODINFO_MODID' is not a plain id"
-  if [[ -n "$dep" ]]; then
-    # dependencies.game is a SemVer minimum; an unsatisfied one means the game skips the mod.
+  # dependencies.game is a SemVer minimum, except "*" (any version), which sort -V ranks above every
+  # real version.
+  if [[ -n "$dep" && "$dep" != "*" ]]; then
     newest="$(printf '%s\n%s\n' "$dep" "$VS_VERSION" | sort -V | tail -1)"
     [[ "$newest" == "$VS_VERSION" ]] || fail "$ctx: needs game >= $dep, the image runs $VS_VERSION"
   fi
