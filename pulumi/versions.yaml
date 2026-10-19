@@ -11,7 +11,7 @@ kvcp_version: v0.0.13
 ghost_image_tag: 6.69.0-alpine
 
 # renovate: datasource=docker depName=registry.gitlab.com/proxmox-k3s/proxmox-k3s-cluster/vints-server
-vints_server_image_tag: 1.2.1
+vints_server_image_tag: 1.2.2
 
 # renovate: datasource=docker depName=registry.gitlab.com/proxmox-k3s/proxmox-k3s-cluster/vints-backup
 vints_backup_image_tag: 1.0.57
