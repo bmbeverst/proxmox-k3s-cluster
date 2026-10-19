@@ -368,8 +368,10 @@ smoke:vints:
       printf 'junk' > "$D/data/Mods/junk.zip"
       printf 'https://example.invalid/x.zip' > "$D/data/Mods/junk.url"
 
-      # 3) networked stage: every pin lands in Mods/ and in the depot
-      podman run --rm -u 0 -e DATA_PATH=/data \
+      # 3) networked stage: every pin lands in Mods/ and in the depot. Runs on a read-only rootfs with
+      # no writable /tmp, which is exactly the init container: a here-string bigger than bash's pipe
+      # buffer spills to a temp file there, so this step is what keeps the API path temp-file free.
+      podman run --rm --read-only --read-only-tmpfs=false -u 0 -e DATA_PATH=/data \
         -v "$D/data":/data -v "$D/config":/config \
         "$IMG" /entrypoints/resolve-vints-mods.sh --stage --mods /config/mods.yaml \
         > "$D/stage.log" 2>&1 || { tail -60 "$D/stage.log"; die "staging the pins failed"; }

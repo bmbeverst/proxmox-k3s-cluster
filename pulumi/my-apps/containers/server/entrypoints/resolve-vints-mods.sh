@@ -178,10 +178,13 @@ parse_pins() {
 # --- Mod DB ------------------------------------------------------------------
 # Body of GET /api/mod/<query>, or non-zero when the mod is not on the Mod DB. A bad urlalias
 # answers 200 with a {"statuscode":"404"} body, so require .mod.modid instead of trusting the status.
+# Pipes, never here-strings: bash spills a here-string bigger than its pipe buffer to a temp file, and
+# the init container's rootfs is read-only (a 97 KB API body used to fail with "cannot create temp
+# file for here-document").
 api_mod() {
   local query="$1" json
   json="$(curl -fsSL --retry 3 "$API/$query")" || return 1
-  jq -e '.mod.modid? // empty | tostring | length > 0' <<<"$json" >/dev/null || return 1
+  printf '%s' "$json" | jq -e '.mod.modid? // empty | tostring | length > 0' >/dev/null || return 1
   printf '%s' "$json"
 }
 
@@ -199,8 +202,8 @@ api_version_release() {
     fi
     fail "$ctx: '$key' has no released version '$pin'"
   fi
-  API_FILEID="$(jq -r '.fileid // empty' <<<"$rel")"
-  API_MODIDSTR="$(jq -r '.modidstr // empty' <<<"$rel")"
+  API_FILEID="$(printf '%s' "$rel" | jq -r '.fileid // empty')"
+  API_MODIDSTR="$(printf '%s' "$rel" | jq -r '.modidstr // empty')"
   [[ -n "$API_FILEID" ]] || fail "$ctx: release '$pin' has no fileid"
   [[ "$API_MODIDSTR" == "$key" ]] \
     || fail "$ctx: release '$pin' carries internal Mod ID '$API_MODIDSTR', expected '$key'"
@@ -415,8 +418,8 @@ promote_entry() {  # <index into the PIN_* arrays>
     untrack "$ctx" "'$ART_MODID' has no released version '$ART_VERSION'"
     return 0
   fi
-  rel_fileid="$(jq -r '.fileid // empty' <<<"$rel")"
-  rel_modidstr="$(jq -r '.modidstr // empty' <<<"$rel")"
+  rel_fileid="$(printf '%s' "$rel" | jq -r '.fileid // empty')"
+  rel_modidstr="$(printf '%s' "$rel" | jq -r '.modidstr // empty')"
   if [[ "$rel_fileid" != "$fileid" ]]; then
     untrack "$ctx" "upstream re-uploaded $ART_MODID $ART_VERSION as fileid $rel_fileid while the URL pins $fileid"
     return 0
