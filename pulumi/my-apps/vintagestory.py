@@ -195,6 +195,24 @@ def register(namespace):
                 spec=k8s.core.v1.PodSpecArgs(
                     affinity=_vints_preferred_nodes(),
                     termination_grace_period_seconds=30,
+                    # The apiserver injects a 300s not-ready/unreachable toleration by default; a dead
+                    # node then means ~6 minutes of downtime before the pod is rescheduled onto the
+                    # other replica. 60s keeps a real node loss short and still rides out a kubelet
+                    # restart or a blip, which would otherwise force a full server restart.
+                    tolerations=[
+                        k8s.core.v1.TolerationArgs(
+                            key="node.kubernetes.io/not-ready",
+                            operator="Exists",
+                            effect="NoExecute",
+                            toleration_seconds=60,
+                        ),
+                        k8s.core.v1.TolerationArgs(
+                            key="node.kubernetes.io/unreachable",
+                            operator="Exists",
+                            effect="NoExecute",
+                            toleration_seconds=60,
+                        ),
+                    ],
                     security_context=k8s.core.v1.PodSecurityContextArgs(
                         run_as_user=1001,
                         run_as_non_root=True,
