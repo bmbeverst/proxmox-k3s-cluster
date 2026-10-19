@@ -107,7 +107,11 @@
       "addLabels": [
         "DO-NOT-MERGE"
       ],
-      "prTitle": "DO NOT MERGE - PKO chart {{{newVersion}}}: apply by hand with pulumi up",
+      "commitMessagePrefix": "DO NOT MERGE -",
+      "commitMessageAction": "",
+      "commitMessageTopic": "PKO chart {{{newVersion}}}:",
+      "commitMessageExtra": "",
+      "commitMessageSuffix": "apply by hand with pulumi up",
       "prBodyNotes": [
         "# DO NOT MERGE",
         "Merging this bump makes PKO upgrade its own chart, and that upgrade replaces the operator running it: the Helm release is cancelled mid-flight and left `pending-rollback`, after which every Helm operation fails with \"another operation (install/upgrade/rollback) is in progress\".",
