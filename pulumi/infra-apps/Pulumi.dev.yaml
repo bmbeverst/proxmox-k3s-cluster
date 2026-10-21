@@ -11,3 +11,5 @@ config:
     secure: AAABAHuXLAtZEzxjsiga/wX1ba0RAJW5+v5d0oeg2833myzQFxgJe/14OFp7rWju+5JaiereP4APbqUYen4BvuYI9Q9w7aVoPKX5Uu85CdrPq8JqGQ==
   infra-apps:acmeEmail:
     secure: AAABADw4HjvrHE+r4nQctAtqnTue2pcyYtHQwy0R1M1/hlsTaQYQ8Z/FUTYmnJkLhoYj
+  infra-apps:cloudflareDdnsToken:
+    secure: AAABACFp1ZDG7I3J1lHLTH5TlheRCYR428iCaJSGIeSWOKe6pSp0pFttIPRIRaln+PY0TIGRuM6nPWs4yy1NmUGP31NANahuWy4iSmsD/0PZs30uvA==

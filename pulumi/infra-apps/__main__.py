@@ -1,6 +1,7 @@
 """These are the apps that are setup to run the cluster infrastructure"""
 
 import os
+import urllib.request
 from typing import Optional
 
 import pulumi
@@ -428,6 +429,114 @@ traefik_default_tls = CustomResource(
     metadata={"name": "default", "namespace": "kube-system"},
     spec={"defaultCertificate": {"secretName": "wildcard-lenatin-org-tls"}},
     opts=ResourceOptions(depends_on=[wildcard_cert]),
+)
+
+# --- Origin lock-down: only Cloudflare may complete TLS ----------------------
+# Global Authenticated Origin Pulls is enabled on the zone, so Cloudflare presents
+# a client certificate signed by this CA. Traefik applies the TLSOption named
+# "default" to every router that does not name one, so new Ingresses are covered.
+# The docs host 403s the default Python user-agent, so send an explicit one.
+_CF_ORIGIN_PULL_CA_URL = (
+    "https://developers.cloudflare.com/ssl/static/authenticated_origin_pull_ca.pem"
+)
+_cf_ca_request = urllib.request.Request(
+    _CF_ORIGIN_PULL_CA_URL, headers={"User-Agent": "curl/8"}
+)
+with urllib.request.urlopen(_cf_ca_request, timeout=60) as _cf_ca_response:
+    CLOUDFLARE_ORIGIN_PULL_CA = _cf_ca_response.read().decode()
+
+cloudflare_origin_pull_ca = k8s.core.v1.Secret(
+    "cloudflare-origin-pull-ca",
+    metadata={"name": "cloudflare-origin-pull-ca", "namespace": "kube-system"},
+    string_data={"ca.crt": CLOUDFLARE_ORIGIN_PULL_CA},
+)
+
+cloudflare_origin_pull = CustomResource(
+    "cloudflare-origin-pull",
+    api_version="traefik.io/v1alpha1",
+    kind="TLSOption",
+    metadata={"name": "default", "namespace": "kube-system"},
+    spec={
+        "minVersion": "VersionTLS12",
+        "clientAuth": {
+            "secretNames": ["cloudflare-origin-pull-ca"],
+            "clientAuthType": "RequireAndVerifyClientCert",
+        },
+    },
+    opts=ResourceOptions(depends_on=[cloudflare_origin_pull_ca]),
+)
+
+# --- DDNS: keeps www.lenatin.org pointed at the WAN IP ----------------------
+# favonia/cloudflare-ddns creates the record if missing and only rewrites it when
+# the IP changes. The token is zone-scoped (Zone:DNS:Edit + Zone:Zone:Read).
+ddns_namespace = k8s.core.v1.Namespace(
+    "cloudflare-ddns",
+    metadata={"name": "cloudflare-ddns"},
+)
+
+ddns_token = k8s.core.v1.Secret(
+    "cloudflare-ddns-token",
+    metadata={"name": "cloudflare-ddns-token", "namespace": "cloudflare-ddns"},
+    string_data={"token": _tls_cfg.require_secret("cloudflareDdnsToken")},
+    opts=ResourceOptions(depends_on=[ddns_namespace]),
+)
+
+cloudflare_ddns = k8s.apps.v1.Deployment(
+    "cloudflare-ddns",
+    metadata={"name": "cloudflare-ddns", "namespace": "cloudflare-ddns"},
+    spec=k8s.apps.v1.DeploymentSpecArgs(
+        replicas=1,
+        selector=k8s.meta.v1.LabelSelectorArgs(match_labels={"app": "cloudflare-ddns"}),
+        template=k8s.core.v1.PodTemplateSpecArgs(
+            metadata={"labels": {"app": "cloudflare-ddns"}},
+            spec=k8s.core.v1.PodSpecArgs(
+                automount_service_account_token=False,
+                security_context=k8s.core.v1.PodSecurityContextArgs(
+                    run_as_non_root=True,
+                    run_as_user=1000,
+                    run_as_group=1000,
+                    seccomp_profile=k8s.core.v1.SeccompProfileArgs(
+                        type="RuntimeDefault"
+                    ),
+                ),
+                containers=[
+                    k8s.core.v1.ContainerArgs(
+                        name="cloudflare-ddns",
+                        image=(
+                            "ghcr.io/favonia/cloudflare-ddns:"
+                            f"{_versions['cfddns_image_tag']}"
+                        ),
+                        env=[
+                            k8s.core.v1.EnvVarArgs(
+                                name="CLOUDFLARE_API_TOKEN",
+                                value_from=k8s.core.v1.EnvVarSourceArgs(
+                                    secret_key_ref=k8s.core.v1.SecretKeySelectorArgs(
+                                        name="cloudflare-ddns-token", key="token"
+                                    )
+                                ),
+                            ),
+                            {"name": "DOMAINS", "value": f"www.{CF_ZONE}"},
+                            {"name": "PROXIED", "value": "true"},
+                            {"name": "IP4_PROVIDER", "value": "cloudflare.trace"},
+                            {"name": "IP6_PROVIDER", "value": "none"},
+                            {"name": "UPDATE_CRON", "value": "@every 5m"},
+                            {"name": "DELETE_ON_STOP", "value": "false"},
+                        ],
+                        security_context=k8s.core.v1.SecurityContextArgs(
+                            allow_privilege_escalation=False,
+                            read_only_root_filesystem=True,
+                            capabilities=k8s.core.v1.CapabilitiesArgs(drop=["ALL"]),
+                        ),
+                        resources=k8s.core.v1.ResourceRequirementsArgs(
+                            requests={"cpu": "10m", "memory": "32Mi"},
+                            limits={"memory": "64Mi"},
+                        ),
+                    )
+                ],
+            ),
+        ),
+    ),
+    opts=ResourceOptions(depends_on=[ddns_namespace, ddns_token]),
 )
 
 # VictoriaMetrics Single Prometheus-compatible TSDB with built-in scraping for KRR.

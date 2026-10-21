@@ -24,3 +24,6 @@ spoolman_image_tag: 0.27.0
 
 # renovate: datasource=docker depName=pulumi/pulumi-python
 pko_workspace_image_tag: 3.261.0
+
+# renovate: datasource=docker depName=ghcr.io/favonia/cloudflare-ddns
+cfddns_image_tag: 1.17.1
