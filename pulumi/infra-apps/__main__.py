@@ -405,7 +405,7 @@ letsencrypt_dns = _acme_issuer(
 )
 
 # One wildcard Certificate (+ apex), stored in Traefik's namespace so it can be
-# the default store. Staging first; switched to prod once issuance is verified.
+# the default store. Issued by the prod issuer; staging is kept for future tests.
 wildcard_cert = CustomResource(
     "wildcard-lenatin-org",
     api_version="cert-manager.io/v1",
@@ -414,10 +414,10 @@ wildcard_cert = CustomResource(
     spec={
         "secretName": "wildcard-lenatin-org-tls",
         "dnsNames": [CF_ZONE, f"*.{CF_ZONE}"],
-        "issuerRef": {"name": "letsencrypt-dns-staging", "kind": "ClusterIssuer"},
+        "issuerRef": {"name": "letsencrypt-dns", "kind": "ClusterIssuer"},
         "privateKey": {"rotationPolicy": "Always"},
     },
-    opts=ResourceOptions(depends_on=[letsencrypt_dns_staging]),
+    opts=ResourceOptions(depends_on=[letsencrypt_dns]),
 )
 
 # Every Ingress gets the wildcard, so no per-host certificate is ever requested.
