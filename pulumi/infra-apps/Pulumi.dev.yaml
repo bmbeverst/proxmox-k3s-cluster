@@ -7,3 +7,7 @@ config:
     secure: AAABAFJQJkH65viz4cQn56O9GfZGN/euXyctW1DIOTV+06/IW59Fi9T6hL6nTruKOA==
   tailscale:clientSecret:
     secure: AAABAJ79WiIv06YOa7Wh/d3ZVaXsL83FlxxZ5kWGi41ybY/JTPePqsp+lVrT6EuDxeRcECK/q2SEHqWIvCkCyisEWO7Q0Ar76xCHhqUfQuL34lfXBx51GHInPR7lIo0N
+  infra-apps:cloudflareApiToken:
+    secure: AAABAHuXLAtZEzxjsiga/wX1ba0RAJW5+v5d0oeg2833myzQFxgJe/14OFp7rWju+5JaiereP4APbqUYen4BvuYI9Q9w7aVoPKX5Uu85CdrPq8JqGQ==
+  infra-apps:acmeEmail:
+    secure: AAABADw4HjvrHE+r4nQctAtqnTue2pcyYtHQwy0R1M1/hlsTaQYQ8Z/FUTYmnJkLhoYj

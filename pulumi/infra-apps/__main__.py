@@ -336,7 +336,8 @@ cert_manager = k8s.helm.v3.Release(
             repo=_chart_deps["cert-manager"]["repository"],
         ),
         values={
-            "installCRDs": True,
+            # CRDs kept on uninstall (crds.keep defaults to true).
+            "crds": {"enabled": True},
             "resources": {
                 "requests": {"cpu": "10m", "memory": "64Mi"},
                 "limits": {"cpu": "100m", "memory": "128Mi"},
@@ -345,6 +346,90 @@ cert_manager = k8s.helm.v3.Release(
         timeout=600,
     ),
 )
+
+# --- TLS: Cloudflare DNS-01, one wildcard for the whole zone -----------------
+# CT logs every publicly trusted certificate, so every hostname shares a single
+# wildcard: only "*.lenatin.org" is published, never individual hostnames.
+_tls_cfg = pulumi.Config()
+_acme_email = _tls_cfg.require_secret("acmeEmail")
+
+CF_ZONE = "lenatin.org"
+
+# Zone-scoped Cloudflare token (Zone:DNS:Edit + Zone:Zone:Read, one zone).
+cloudflare_api_token = k8s.core.v1.Secret(
+    "cloudflare-api-token",
+    metadata={"name": "cloudflare-api-token", "namespace": "cert-manager"},
+    string_data={"api-token": _tls_cfg.require_secret("cloudflareApiToken")},
+    opts=ResourceOptions(depends_on=[cert_manager]),
+)
+
+
+def _acme_issuer(name: str, server: str) -> CustomResource:
+    """DNS-01-only issuer, locked to CF_ZONE so the token cannot solve elsewhere."""
+    return CustomResource(
+        name,
+        api_version="cert-manager.io/v1",
+        kind="ClusterIssuer",
+        metadata={"name": name},
+        spec={
+            "acme": {
+                "server": server,
+                "email": _acme_email,
+                "privateKeySecretRef": {"name": f"{name}-account-key"},
+                "solvers": [
+                    {
+                        "dns01": {
+                            "cloudflare": {
+                                "apiTokenSecretRef": {
+                                    "name": "cloudflare-api-token",
+                                    "key": "api-token",
+                                }
+                            }
+                        },
+                        "selector": {"dnsZones": [CF_ZONE]},
+                    }
+                ],
+            }
+        },
+        opts=ResourceOptions(depends_on=[cloudflare_api_token]),
+    )
+
+
+letsencrypt_dns_staging = _acme_issuer(
+    "letsencrypt-dns-staging",
+    "https://acme-staging-v02.api.letsencrypt.org/directory",
+)
+letsencrypt_dns = _acme_issuer(
+    "letsencrypt-dns",
+    "https://acme-v02.api.letsencrypt.org/directory",
+)
+
+# One wildcard Certificate (+ apex), stored in Traefik's namespace so it can be
+# the default store. Staging first; switched to prod once issuance is verified.
+wildcard_cert = CustomResource(
+    "wildcard-lenatin-org",
+    api_version="cert-manager.io/v1",
+    kind="Certificate",
+    metadata={"name": "wildcard-lenatin-org", "namespace": "kube-system"},
+    spec={
+        "secretName": "wildcard-lenatin-org-tls",
+        "dnsNames": [CF_ZONE, f"*.{CF_ZONE}"],
+        "issuerRef": {"name": "letsencrypt-dns-staging", "kind": "ClusterIssuer"},
+        "privateKey": {"rotationPolicy": "Always"},
+    },
+    opts=ResourceOptions(depends_on=[letsencrypt_dns_staging]),
+)
+
+# Every Ingress gets the wildcard, so no per-host certificate is ever requested.
+traefik_default_tls = CustomResource(
+    "traefik-default-tls-store",
+    api_version="traefik.io/v1alpha1",
+    kind="TLSStore",
+    metadata={"name": "default", "namespace": "kube-system"},
+    spec={"defaultCertificate": {"secretName": "wildcard-lenatin-org-tls"}},
+    opts=ResourceOptions(depends_on=[wildcard_cert]),
+)
+
 # VictoriaMetrics Single Prometheus-compatible TSDB with built-in scraping for KRR.
 vmsingle = k8s.helm.v3.Release(
     "vmsingle",

@@ -4,4 +4,5 @@
 - piraeus
 - system-upgrade
 - linstor-affinity
-- cert-manager (installed, idle until ingress/TLS work)
+- cert-manager + Cloudflare DNS-01 issuers (`letsencrypt-dns`, `letsencrypt-dns-staging`)
+- wildcard `*.lenatin.org` certificate + Traefik default TLSStore
