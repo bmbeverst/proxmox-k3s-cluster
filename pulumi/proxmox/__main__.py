@@ -68,11 +68,6 @@ NODES: list[NodeConfig] = [
 TEMPLATE_VM_ID = 9002
 # Where the template lives; VMs may be cloned to another node_name.
 TEMPLATE_NODE = "pve"
-# Hook script lives in the `data_dir` datastore (snippets), same path on pve and
-# pve2. Its FCAR_TMPLT points next to it, so both files must exist per host.
-HOOK_SCRIPT = "data_dir:snippets/hook-fcar.sh"
-# Flatcar config base dir used by the -fw_cfg ignition argument (host path).
-FLATCAR_IGN_BASE = "/etc/pve/flatcar"
 ON_BOOT = False
 
 # Per-VM defaults: a control-plane VM on pve, cloned (not copied) from TEMPLATE_NODE.
@@ -160,11 +155,13 @@ for node in NODES:
                 "size": disk_gb,
             },
         ],
-        kvm_arguments=(
-            f"-fw_cfg name=opt/org.flatcar-linux/config,"
-            f"file={FLATCAR_IGN_BASE}/{vm_id}.ign"
-        ),
-        hook_script_file_id=HOOK_SCRIPT,
+        # hookscript and args (the Flatcar -fw_cfg ignition pointer) are
+        # deliberately absent: PVE only lets root@pam set them, and this stack
+        # auths as the least-privilege pulumi@pve user (PROXMOX-USER-AUTH.md).
+        # Both arrive without root anyway: clones inherit the template 9002's
+        # hookscript, and hook-fcar.sh sets the fw_cfg args at the VM's first
+        # pre-start. Both are in ignore_changes so node1-3's state-held values
+        # (set in a root context, pre least-privilege user) are never purged.
         network_devices=[
             {
                 "bridge": BRIDGE,
@@ -210,6 +207,10 @@ for node in NODES:
                 "networkInterfaceNames",
                 "ipv4Addresses",
                 "ipv6Addresses",
+                # Root-only fields (see the comment above network_devices):
+                # present in state for node1-3, absent from code forever.
+                "hookScriptFileId",
+                "kvmArguments",
             ]
         ),
     )

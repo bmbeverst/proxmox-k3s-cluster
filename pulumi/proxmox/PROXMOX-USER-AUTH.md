@@ -66,6 +66,27 @@ pulumi config set --secret proxmoxve:password "<password from step 2>"
 pulumi config set proxmoxve:insecure false
 ```
 
+## Root-only VM fields: hookscript and args
+
+PVE lets **only `root@pam`** set a VM's `hookscript` and `args`, regardless of
+role privileges — both can execute arbitrary code on the host. A create whose
+desired config declares either field therefore fails as `pulumi@pve` with
+`HTTP 500: only root can set 'hookscript' config`.
+
+The stack needs neither, by design:
+
+- **hookscript** — `qm clone` copies it from the template (9002 carries
+  `data_dir:snippets/hook-fcar.sh`), so every clone has it from birth.
+- **args** (the Flatcar `-fw_cfg` ignition pointer) — `hook-fcar.sh` sets it
+  itself at the VM's first pre-start (hook scripts run as root) and restarts
+  the VM once so the generated ignition applies.
+
+So `pulumi/proxmox/__main__.py` deliberately omits both fields and lists them
+(`hookScriptFileId`, `kvmArguments`) in `ignore_changes`, keeping node1-3's
+state-held values from being purged. Do not re-add them to the VM spec: a
+create as `pulumi@pve` would fail, and steady state works precisely because
+they are never sent.
+
 ## Rotate the password later
 
 ```bash
