@@ -124,10 +124,21 @@ def register(namespace):
                                 requests={"cpu": "100m", "memory": "256Mi"},
                                 limits={"cpu": "500m", "memory": "768Mi"},
                             ),
+                            # Ghost redirects any request whose host/proto is not
+                            # canonical, and the kubelet follows that 301 to a TLS
+                            # port Ghost does not serve. Claim the canonical host.
                             liveness_probe=k8s.core.v1.ProbeArgs(
                                 http_get=k8s.core.v1.HTTPGetActionArgs(
                                     path="/",
                                     port=2368,
+                                    http_headers=[
+                                        k8s.core.v1.HTTPHeaderArgs(
+                                            name="Host", value=GHOST_HOST
+                                        ),
+                                        k8s.core.v1.HTTPHeaderArgs(
+                                            name="X-Forwarded-Proto", value="https"
+                                        ),
+                                    ],
                                 ),
                                 initial_delay_seconds=45,
                                 period_seconds=20,
@@ -138,6 +149,14 @@ def register(namespace):
                                 http_get=k8s.core.v1.HTTPGetActionArgs(
                                     path="/",
                                     port=2368,
+                                    http_headers=[
+                                        k8s.core.v1.HTTPHeaderArgs(
+                                            name="Host", value=GHOST_HOST
+                                        ),
+                                        k8s.core.v1.HTTPHeaderArgs(
+                                            name="X-Forwarded-Proto", value="https"
+                                        ),
+                                    ],
                                 ),
                                 initial_delay_seconds=20,
                                 period_seconds=15,
