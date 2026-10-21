@@ -1,39 +1,92 @@
 import os
 import pathlib
-from typing import TypedDict
+from typing import NotRequired, TypedDict
 
 import pulumi
 import pulumi_proxmoxve as proxmoxve
 
 
 class NodeConfig(TypedDict):
+    """One VM. Anything not set falls back to the DEFAULT_* values below."""
+
     name: str
     vm_id: int
     ip: str
+    node_name: NotRequired[str]
+    datastore: NotRequired[str]
+    cores: NotRequired[int]
+    memory_mb: NotRequired[int]
+    disk_gb: NotRequired[int]
+    cache: NotRequired[str]
+    full_clone: NotRequired[bool]
 
 
 # ---------------------------------------------------------------------------
 # Configuration — change values here, everything else follows.
 # ---------------------------------------------------------------------------
 NODES: list[NodeConfig] = [
+    # Two servers on pve, one on pve2 (s1/s2/s3). node3 is still running and is
+    # retired only after node4 has rejoined: adding first, removing second keeps
+    # etcd at 3+ members the whole way.
     {"name": "node1", "vm_id": 111, "ip": "10.10.1.111/24"},
     {"name": "node2", "vm_id": 112, "ip": "10.10.1.112/24"},
     {"name": "node3", "vm_id": 113, "ip": "10.10.1.113/24"},
+    # s3: server on pve2. The template only exists on pve, so a cross-node clone
+    # has to be full — which is also what pvesr needs to replicate the disk.
+    # cache=none is not negotiable here: pve2 is HDD-backed and this VM is an
+    # etcd member, so `unsafe` (the old manual setting) can lose quorum writes.
+    {
+        "name": "node4",
+        "vm_id": 102,
+        "ip": "10.10.1.44/24",
+        "node_name": "pve2",
+        "cache": "none",
+        "full_clone": True,
+    },
+    # a1: heavy worker on pve, gets the RAM/CPU the two servers leave.
+    {
+        "name": "node5",
+        "vm_id": 115,
+        "ip": "10.10.1.45/24",
+        "cores": 8,
+        "memory_mb": 14336,
+        "disk_gb": 40,
+        "full_clone": True,
+    },
+    # a2: light worker on pve2.
+    {
+        "name": "node6",
+        "vm_id": 116,
+        "ip": "10.10.1.46/24",
+        "node_name": "pve2",
+        "disk_gb": 40,
+        "cache": "none",
+        "full_clone": True,
+    },
 ]
 
 TEMPLATE_VM_ID = 9002
-NODE_NAME = "pve"
-DATASTORE = "data"
-# Hook script lives in the `data_dir` datastore (snippets).
+# Where the template lives; VMs may be cloned to another node_name.
+TEMPLATE_NODE = "pve"
+# Hook script lives in the `data_dir` datastore (snippets), same path on pve and
+# pve2. Its FCAR_TMPLT points next to it, so both files must exist per host.
 HOOK_SCRIPT = "data_dir:snippets/hook-fcar.sh"
 # Flatcar config base dir used by the -fw_cfg ignition argument (host path).
 FLATCAR_IGN_BASE = "/etc/pve/flatcar"
-LINKED_CLONE = True
 ON_BOOT = False
 
-# Hardware / network defaults.
-CORES = 3
-MEMORY_MB = 9216  # 9 GiB; matches the running VMs (no floating = no balloon)
+# Per-VM defaults: a control-plane VM on pve, cloned (not copied) from TEMPLATE_NODE.
+DEFAULT_NODE_NAME = "pve"
+DEFAULT_DATASTORE = "data"
+DEFAULT_CORES = 2
+DEFAULT_MEMORY_MB = 6144  # 6 GiB for a server; no floating = no balloon
+DEFAULT_DISK_GB = 24
+# PVE's default for a VM disk. Never `unsafe`: it ignores the guest's flushes, so
+# an etcd write it acknowledges can be lost on a host power cut.
+DEFAULT_DISK_CACHE = "none"
+DEFAULT_FULL_CLONE = False
+
+# Network defaults.
 BRIDGE = "vmbr0"
 GATEWAY = "10.10.1.1"
 
@@ -58,20 +111,27 @@ for node in NODES:
     name = node["name"]
     vm_id = node["vm_id"]
     ip = node["ip"]
+    node_name = node.get("node_name", DEFAULT_NODE_NAME)
+    datastore = node.get("datastore", DEFAULT_DATASTORE)
+    cores = node.get("cores", DEFAULT_CORES)
+    memory_mb = node.get("memory_mb", DEFAULT_MEMORY_MB)
+    disk_gb = node.get("disk_gb", DEFAULT_DISK_GB)
+    disk_cache = node.get("cache", DEFAULT_DISK_CACHE)
+    full_clone = node.get("full_clone", DEFAULT_FULL_CLONE)
 
     vm = proxmoxve.vm.VirtualMachine(
         name,
-        node_name=NODE_NAME,
+        node_name=node_name,
         vm_id=vm_id,
         name=name,
         clone={
             "vm_id": TEMPLATE_VM_ID,
-            "node_name": NODE_NAME,
-            "full": not LINKED_CLONE,
+            "node_name": TEMPLATE_NODE,
+            "full": full_clone,
             # `datastore_id` is only valid for FULL clones. PVE refuses it for
             # linked clones, which inherit the template's datastore (9002 is
-            # on `data`), so we omit it when LINKED_CLONE is True.
-            **({"datastore_id": DATASTORE} if not LINKED_CLONE else {}),
+            # on `data`), so we omit it for linked clones.
+            **({"datastore_id": datastore} if full_clone else {}),
         },
         agent={
             "enabled": True,
@@ -79,10 +139,10 @@ for node in NODES:
         },
         cpu={
             "type": "host",
-            "cores": CORES,
+            "cores": cores,
         },
         memory={
-            "dedicated": MEMORY_MB,
+            "dedicated": memory_mb,
         },
         operating_system={
             "type": "l26",
@@ -91,13 +151,13 @@ for node in NODES:
         disks=[
             {
                 "interface": "scsi0",
-                "datastore_id": DATASTORE,
+                "datastore_id": datastore,
                 "iothread": True,
-                "cache": "none",
+                "cache": disk_cache,
                 "aio": "io_uring",
                 "discard": "ignore",
                 "ssd": False,
-                "size": 24,
+                "size": disk_gb,
             },
         ],
         kvm_arguments=(
@@ -122,7 +182,7 @@ for node in NODES:
         tablet_device=False,
         on_boot=ON_BOOT,
         initialization={
-            "datastore_id": DATASTORE,
+            "datastore_id": datastore,
             "type": "nocloud",
             "ip_configs": [
                 {

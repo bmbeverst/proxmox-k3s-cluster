@@ -13,4 +13,15 @@ systemReserved:
 disable:
   - servicelb
 
+{% if k3s_role == 'agent' %}
+# Agents have no apiserver to advertise: advertise-address is a server-only
+# flag and k3s refuses to start an agent that is given it.
+node-ip: "{{ advertise_address }}"
+{% else %}
 advertise-address: "{{ advertise_address }}"
+{% endif %}
+
+# Which Proxmox host this VM runs on. Not discoverable from inside the guest
+# (DMI reports QEMU, not the host), so the inventory passes it in.
+node-label:
+  - "proxmox-host={{ proxmox_host }}"

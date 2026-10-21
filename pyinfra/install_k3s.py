@@ -3,6 +3,7 @@ This script will install k3s on a host and configure journald to not use so much
 It will first install on the init node,
 then checks that kuberentes is running and then installs on all other nodes.
 Skips the k3s install if already installed.
+Hosts join as a server unless the inventory sets k3s_role: agent.
 """
 
 from pyinfra import host
@@ -13,6 +14,16 @@ from pyinfra.operations import files, server, systemd
 tls_san = host.data.get("tls_san")
 
 k3s_token = host.data.get("k3s_token")
+
+# Role and Proxmox host come from the inventory; group_data/all.py holds the
+# server/pve defaults. Fail loudly rather than install with an empty label.
+k3s_role = host.data.get("k3s_role")
+proxmox_host = host.data.get("proxmox_host")
+if not k3s_role or not proxmox_host:
+    raise Exception("k3s_role and proxmox_host must be set (group_data/all.py)")
+
+# Servers run the k3s unit, agents run k3s-agent.
+k3s_service = "k3s-agent" if k3s_role == "agent" else "k3s"
 
 # Check if this is the init node
 is_init_node = host.data.get("init_k3s", False)
@@ -62,14 +73,24 @@ else:
                 f'echo "init node {init_node_ip}:6443 not reachable after ~30s" >&2; exit 1'
             ],
         )
-        # Install k3s on worker node
-        server.shell(
-            name="Install k3s on worker node",
-            commands=[
-                f'curl -sfL https://get.k3s.io | INSTALL_K3S_SKIP_SELINUX_RPM=true sh -s - --secrets-encryption --token "{k3s_token}" --tls-san "{tls_san}" --server "https://{init_node_ip}:6443"'  # pylint: disable=line-too-long
-            ],
-            # _timeout=120, # This can be an issue due to GitHub throttling
-        )
+        # Install k3s as a server or a worker
+        if k3s_role == "agent":
+            # Agents join with K3S_URL instead of the server flags; the cluster
+            # token is the same one the servers use.
+            server.shell(
+                name="Install k3s agent",
+                commands=[
+                    f'curl -sfL https://get.k3s.io | INSTALL_K3S_SKIP_SELINUX_RPM=true K3S_URL="https://{init_node_ip}:6443" K3S_TOKEN="{k3s_token}" sh -s -'  # pylint: disable=line-too-long
+                ],
+            )
+        else:
+            server.shell(
+                name="Install k3s server",
+                commands=[
+                    f'curl -sfL https://get.k3s.io | INSTALL_K3S_SKIP_SELINUX_RPM=true sh -s - --secrets-encryption --token "{k3s_token}" --tls-san "{tls_san}" --server "https://{init_node_ip}:6443"'  # pylint: disable=line-too-long
+                ],
+                # _timeout=120, # This can be an issue due to GitHub throttling
+            )
 
 
 k3s_config = files.template(
@@ -80,13 +101,15 @@ k3s_config = files.template(
     user="root",
     group="root",
     advertise_address=host.name,
+    k3s_role=k3s_role,
+    proxmox_host=proxmox_host,
     _sudo=True,
 )
 
 
 # Restart k3s if any configuration was changed
 systemd.service(
-    "k3s",
+    k3s_service,
     running=True,
     restarted=True,
     _if=k3s_config.did_change,
