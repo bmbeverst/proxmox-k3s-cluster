@@ -17,9 +17,11 @@ GHOST_IMAGE = f"ghost:{_versions['ghost_image_tag']}"
 
 NAMESPACE = "ghost"
 
-# One canonical URL for Ghost, served through the kube-vip LoadBalancer VIP.
+# One canonical URL for Ghost, served through Traefik; the VIP stays for LAN use.
+GHOST_HOST = "www.lenatin.org"
+GHOST_URL = f"https://{GHOST_HOST}"
+# kube-vip VIP, LAN only.
 GHOST_LB_IP = "10.10.1.90"
-GHOST_URL = f"http://{GHOST_LB_IP}"
 
 # The nodes holding a diskful ghost-content replica, read from LINSTOR
 # (`linstor rd ... resources`: node2 and node3 hold the disk, node1 is the
@@ -182,4 +184,40 @@ def register(namespace):
             ],
         ),
         opts=pulumi.ResourceOptions(depends_on=[namespace, ghost]),
+    )
+
+    # Public entry: Traefik serves the wildcard (no secretName, so cert-manager
+    # never mints a per-host cert); the default TLS policy requires Cloudflare's
+    # client certificate, so no annotation is needed here.
+    ghost_ingress = k8s.networking.v1.Ingress(
+        "ghost",
+        metadata=ObjectMetaArgs(name="ghost", namespace=NAMESPACE),
+        spec=k8s.networking.v1.IngressSpecArgs(
+            ingress_class_name="traefik",
+            rules=[
+                k8s.networking.v1.IngressRuleArgs(
+                    host=GHOST_HOST,
+                    http=k8s.networking.v1.HTTPIngressRuleValueArgs(
+                        paths=[
+                            k8s.networking.v1.HTTPIngressPathArgs(
+                                path="/",
+                                path_type="Prefix",
+                                backend=k8s.networking.v1.IngressBackendArgs(
+                                    service=k8s.networking.v1.IngressServiceBackendArgs(
+                                        name="ghost",
+                                        port=k8s.networking.v1.ServiceBackendPortArgs(
+                                            number=80
+                                        ),
+                                    )
+                                ),
+                            )
+                        ]
+                    ),
+                )
+            ],
+            tls=[k8s.networking.v1.IngressTLSArgs(hosts=[GHOST_HOST])],
+        ),
+        opts=pulumi.ResourceOptions(
+            depends_on=[namespace, ghost, ghost_service],
+        ),
     )
