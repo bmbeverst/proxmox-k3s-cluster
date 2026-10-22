@@ -31,14 +31,16 @@ NODES: list[NodeConfig] = [
     {"name": "node2", "vm_id": 112, "ip": "10.10.1.42/24"},
     # s3: server on pve2. The template only exists on pve, so a cross-node clone
     # has to be full — which is also what pvesr needs to replicate the disk.
-    # cache=none is not negotiable here: pve2 is HDD-backed and this VM is an
-    # etcd member, so `unsafe` (the old manual setting) can lose quorum writes.
+    # cache=unsafe is a deliberate override (2026-10-22): pve2's data pool is
+    # spinning rust and cache=none made etcd unusably slow. Tradeoff: an
+    # acknowledged write can be lost on a host power cut. Revisit when pve2
+    # gets an SSD or a SLOG.
     {
         "name": "node4",
         "vm_id": 102,
         "ip": "10.10.1.44/24",
         "node_name": "pve2",
-        "cache": "none",
+        "cache": "unsafe",
         "full_clone": True,
     },
     # a1: heavy worker on pve, gets the RAM/CPU the two servers leave.
@@ -51,14 +53,15 @@ NODES: list[NodeConfig] = [
         "disk_gb": 40,
         "full_clone": True,
     },
-    # a2: light worker on pve2.
+    # a2: light worker on pve2. cache=unsafe for the same reason as node4:
+    # pve2's data pool is spinning rust.
     {
         "name": "node6",
         "vm_id": 116,
         "ip": "10.10.1.46/24",
         "node_name": "pve2",
         "disk_gb": 40,
-        "cache": "none",
+        "cache": "unsafe",
         "full_clone": True,
     },
 ]
