@@ -59,6 +59,34 @@ PASEO_UID = 1000
 # Passed to paseo-init.sh as its single chown target.
 PASEO_OWNER = f"{PASEO_UID}:{PASEO_UID}"
 
+# 2026-10-22 redesign: the diskful paseo-home/workspace replicas live on node5
+# (worker, file-thin local disk). Preferred, not pinned, so the pod can still
+# move (it then attaches diskless until the node returns).
+PASEO_PREFERRED_NODES = ["node5"]
+
+
+def _paseo_preferred_nodes():
+    """Prefer the node holding the diskful paseo replicas, without pinning."""
+    return k8s.core.v1.AffinityArgs(
+        node_affinity=k8s.core.v1.NodeAffinityArgs(
+            preferred_during_scheduling_ignored_during_execution=[
+                k8s.core.v1.PreferredSchedulingTermArgs(
+                    weight=100,
+                    preference=k8s.core.v1.NodeSelectorTermArgs(
+                        match_expressions=[
+                            k8s.core.v1.NodeSelectorRequirementArgs(
+                                key="kubernetes.io/hostname",
+                                operator="In",
+                                values=PASEO_PREFERRED_NODES,
+                            ),
+                        ],
+                    ),
+                ),
+            ],
+        ),
+    )
+
+
 _paseo_cfg = pulumi.Config("my-apps")
 _paseo_registry_user = _paseo_cfg.require_secret("vintsRegistryReadUser")
 _paseo_registry_token = _paseo_cfg.require_secret("vintsRegistryReadToken")
@@ -396,6 +424,7 @@ def register(namespace):
                             ],
                         ),
                     ],
+                    affinity=_paseo_preferred_nodes(),
                     volumes=[
                         k8s.core.v1.VolumeArgs(
                             name="paseo-home",

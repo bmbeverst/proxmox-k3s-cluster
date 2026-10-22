@@ -554,6 +554,26 @@ vmsingle = k8s.helm.v3.Release(
             "server": {
                 "retentionPeriod": "60d",
                 "extraArgs": {"promscrape.configCheckInterval": "1m"},
+                # 2026-10-22 redesign: prefer node6, where the diskful vmsingle
+                # volume replica lives (file-thin local disk).
+                "affinity": {
+                    "nodeAffinity": {
+                        "preferredDuringSchedulingIgnoredDuringExecution": [
+                            {
+                                "weight": 100,
+                                "preference": {
+                                    "matchExpressions": [
+                                        {
+                                            "key": "kubernetes.io/hostname",
+                                            "operator": "In",
+                                            "values": ["node6"],
+                                        }
+                                    ],
+                                },
+                            }
+                        ],
+                    }
+                },
                 "scrape": {
                     "enabled": True,
                     "config": {

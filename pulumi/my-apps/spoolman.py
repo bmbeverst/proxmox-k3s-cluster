@@ -46,6 +46,32 @@ SPOOLMAN_NFS_PATH = "/pvebackup/spoolman"
 VINTS_NFS_GID = 1001
 SPOOLMAN_BACKUP_KEEP = 7
 
+# 2026-10-22 redesign: the diskful spoolman-data replica lives on node5
+# (worker, file-thin local disk). Preferred, not pinned.
+SPOOLMAN_PREFERRED_NODES = ["node5"]
+
+
+def _spoolman_preferred_nodes():
+    """Prefer the node holding the diskful spoolman-data replica, without pinning."""
+    return k8s.core.v1.AffinityArgs(
+        node_affinity=k8s.core.v1.NodeAffinityArgs(
+            preferred_during_scheduling_ignored_during_execution=[
+                k8s.core.v1.PreferredSchedulingTermArgs(
+                    weight=100,
+                    preference=k8s.core.v1.NodeSelectorTermArgs(
+                        match_expressions=[
+                            k8s.core.v1.NodeSelectorRequirementArgs(
+                                key="kubernetes.io/hostname",
+                                operator="In",
+                                values=SPOOLMAN_PREFERRED_NODES,
+                            ),
+                        ],
+                    ),
+                ),
+            ],
+        ),
+    )
+
 
 def register(namespace):
     """Create PVC, Deployment, LAN Service and backup CronJob.
@@ -274,6 +300,7 @@ def register(namespace):
                                     ],
                                 ),
                             ],
+                            affinity=_spoolman_preferred_nodes(),
                             volumes=[
                                 k8s.core.v1.VolumeArgs(
                                     name="spoolman-data",

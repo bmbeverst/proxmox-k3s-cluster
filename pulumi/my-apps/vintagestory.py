@@ -61,7 +61,9 @@ _vints_dockerconfig = pulumi.Output.all(
     _vints_registry_user, _vints_registry_token
 ).apply(lambda ut: _vints_dockerconfigjson(ut[0], ut[1]))
 
-VINTS_PREFERRED_NODES = ["node1", "node2"]
+# 2026-10-22 redesign: the diskful vints-data replica lives on node5 (worker,
+# file-thin local disk). Revisit if the volume is ever re-placed.
+VINTS_PREFERRED_NODES = ["node5"]
 VINTS_PORT = 42420
 VINTS_LB_IP = "10.10.1.91"  # kube-vip LoadBalancer VIP (static)
 # Server console input: the FIFO start-vints.sh keeps open as the server's stdin.

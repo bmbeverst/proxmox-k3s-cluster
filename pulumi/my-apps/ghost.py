@@ -21,10 +21,10 @@ NAMESPACE = "ghost"
 GHOST_LB_IP = "10.10.1.90"
 GHOST_URL = f"http://{GHOST_LB_IP}"
 
-# The nodes holding a diskful ghost-content replica, read from LINSTOR
-# (`linstor rd ... resources`: node2 and node3 hold the disk, node1 is the
-# tiebreaker). Revisit if the volume is ever re-placed.
-GHOST_PREFERRED_NODES = ["node2", "node3"]
+# The nodes holding a diskful ghost-content replica. 2026-10-22 redesign: the
+# replica lives on node6 (worker, file-thin local disk); node1 is the diskless
+# tiebreaker. Revisit if the volume is ever re-placed.
+GHOST_PREFERRED_NODES = ["node6"]
 
 
 def _ghost_preferred_nodes():
