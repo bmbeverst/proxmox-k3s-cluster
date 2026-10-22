@@ -5,13 +5,17 @@ kubelet-arg:
   - "kube-reserved=cpu=300m,memory=640Mi"
   - "eviction-hard=memory.available<300Mi"
 
+{% if k3s_role != 'agent' %}
 systemReserved:
   cpu: "100m" # Reserve 100 millicores for OS
   memory: "150Mi" # Reserve 150MB for system processes
 
 # kube-vip owns LoadBalancer VIPs, so ServiceLB must be off.
+# Server-only keys: k3s agents reject flags they don't define (systemReserved
+# fatalled node5's install; ServiceLB never runs on an agent anyway).
 disable:
   - servicelb
+{% endif %}
 
 {% if k3s_role == 'agent' %}
 # Agents have no apiserver to advertise: advertise-address is a server-only
