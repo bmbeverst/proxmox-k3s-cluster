@@ -1,8 +1,8 @@
 # Servers are the etcd members: two on pve, one on pve2. Group defaults live in
 # group_data/k3s_servers.py, so a host only lists what it overrides.
 k3s_servers = [
-    ("10.10.1.111", {"init_k3s": True}),
-    ("10.10.1.112", {}),
+    ("10.10.1.41", {"init_k3s": True}),
+    ("10.10.1.42", {}),
     ("10.10.1.44", {"proxmox_host": "pve2"}),
 ]
 

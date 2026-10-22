@@ -27,8 +27,8 @@ class NodeConfig(TypedDict):
 NODES: list[NodeConfig] = [
     # Two servers on pve, one on pve2 (s1/s2/s3). node3 was retired in Phase 6.2
     # after node4 rejoined: adding first, removing second kept etcd at 3+ members.
-    {"name": "node1", "vm_id": 111, "ip": "10.10.1.111/24"},
-    {"name": "node2", "vm_id": 112, "ip": "10.10.1.112/24"},
+    {"name": "node1", "vm_id": 111, "ip": "10.10.1.41/24"},
+    {"name": "node2", "vm_id": 112, "ip": "10.10.1.42/24"},
     # s3: server on pve2. The template only exists on pve, so a cross-node clone
     # has to be full — which is also what pvesr needs to replicate the disk.
     # cache=none is not negotiable here: pve2 is HDD-backed and this VM is an
