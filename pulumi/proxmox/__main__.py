@@ -40,6 +40,8 @@ NODES: list[NodeConfig] = [
         "vm_id": 102,
         "ip": "10.10.1.44/24",
         "node_name": "pve2",
+        # 2026-10-22: gave 1 GiB to node6 (paseo is too heavy for a 6 GiB worker).
+        "memory_mb": 5120,
         "cache": "unsafe",
         "full_clone": True,
     },
@@ -53,13 +55,15 @@ NODES: list[NodeConfig] = [
         "disk_gb": 40,
         "full_clone": True,
     },
-    # a2: light worker on pve2. cache=unsafe for the same reason as node4:
-    # pve2's data pool is spinning rust.
+    # a2: worker on pve2. cache=unsafe for the same reason as node4: pve2's
+    # data pool is spinning rust. 2026-10-22: 8192 MiB (was 6144) — paseo
+    # OOM-starved this node when it drifted here; +1 GiB taken from node4.
     {
         "name": "node6",
         "vm_id": 116,
         "ip": "10.10.1.46/24",
         "node_name": "pve2",
+        "memory_mb": 8192,
         "disk_gb": 40,
         "cache": "unsafe",
         "full_clone": True,
