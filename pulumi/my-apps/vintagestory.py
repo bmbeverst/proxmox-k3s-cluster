@@ -1,12 +1,9 @@
-"""Vintage Story dedicated server deployed on the k3s cluster
+"""Vintage Story server on k3s, own `vintagestory` namespace.
 
-- Self-built image (`.NET 10` runtime + the pinned game baked in by CI)
-  an init container only syncs mods every pod start, and the game
-  version is whatever the image tag says.
-- World/config/mods persisted on the StorageClass
-- Backup = a CronJob at midnight ET: stops the Deployment, tars the world + config to an
-  NFS share, starts the Deployment again.
-
+- CI-built image (`.NET 10` + pinned game).
+- Init syncs mods from CI bundle each start.
+- World/config on linstor-r2 PVC.
+- Nightly CronJob backup to NFS.
 """
 
 import base64
@@ -25,7 +22,7 @@ with open(os.path.join(os.path.dirname(__file__), "..", "versions.yaml")) as f:
 
 NAMESPACE = "vintagestory"
 
-# Images are built + pushed to the project GitLab registry by CI.
+# Images built + pushed by CI.
 VINTS_REGISTRY = "registry.gitlab.com"
 VINTS_REGISTRY_IMAGE_ROOT = f"{VINTS_REGISTRY}/proxmox-k3s/proxmox-k3s-cluster"
 VINTS_IMAGE = (
@@ -34,8 +31,7 @@ VINTS_IMAGE = (
 VINTS_BACKUP_IMAGE = (
     f"{VINTS_REGISTRY_IMAGE_ROOT}/vints-backup:{_versions['vints_backup_image_tag']}"
 )
-# The CI-baked mod depot (`bake:vints-mods`); the seed init container copies /bundle from it. No
-# versions.yaml entry on purpose: the tag is fixed, the content moves with the pins.
+# CI-baked mod depot.
 VINTS_MODS_IMAGE = f"{VINTS_REGISTRY_IMAGE_ROOT}/vints-mods:latest"
 
 _vints_cfg = pulumi.Config("my-apps")
@@ -61,19 +57,14 @@ _vints_dockerconfig = pulumi.Output.all(
     _vints_registry_user, _vints_registry_token
 ).apply(lambda ut: _vints_dockerconfigjson(ut[0], ut[1]))
 
-# 2026-10-22 redesign: the diskful vints-data replica lives on node5 (worker,
-# file-thin local disk). Revisit if the volume is ever re-placed.
-VINTS_PREFERRED_NODES = ["node5"]
 VINTS_PORT = 42420
 VINTS_LB_IP = "10.10.1.91"  # kube-vip LoadBalancer VIP (static)
-# Server console input: the FIFO start-vints.sh keeps open as the server's stdin.
+# FIFO for server console stdin.
 VINTS_CONSOLE_FIFO = "/tmp/vints-console.fifo"
 VINTS_NFS_SERVER = "10.10.1.101"  # host serving the backup export
 VINTS_NFS_PATH = "/pvebackup"  # export; writable by uid 1001
 
-# The mod pins are the source of truth and live in git: one "<key>: <version|url>" line per mod,
-# where a version pin's key is the mod's internal Mod ID (the same key Renovate tracks and the game
-# loads). The resolver in the image turns them into $DATA_PATH/Mods on every pod start.
+# Mod pins live in git.
 with open(
     os.path.join(
         os.path.dirname(__file__), "containers", "server", "vintagestory-mods.yaml"
@@ -83,35 +74,14 @@ with open(
 
 
 def _vints_env():
-    # Shared env for both the init (mods) container and the main server container.
+    # Shared env for init + server.
     return [
         {"name": "DATA_PATH", "value": "/data"},
         {"name": "PORT", "value": str(VINTS_PORT)},
-        # start-vints.sh creates this FIFO and reads console commands from it; vints-console writes to it.
+        # FIFO for console commands.
         {"name": "CONSOLE_FIFO", "value": VINTS_CONSOLE_FIFO},
     ]
 
-
-def _vints_preferred_nodes():
-    """Prefer the nodes holding a diskful vints-data replica, without pinning."""
-    return k8s.core.v1.AffinityArgs(
-        node_affinity=k8s.core.v1.NodeAffinityArgs(
-            preferred_during_scheduling_ignored_during_execution=[
-                k8s.core.v1.PreferredSchedulingTermArgs(
-                    weight=100,
-                    preference=k8s.core.v1.NodeSelectorTermArgs(
-                        match_expressions=[
-                            k8s.core.v1.NodeSelectorRequirementArgs(
-                                key="kubernetes.io/hostname",
-                                operator="In",
-                                values=VINTS_PREFERRED_NODES,
-                            ),
-                        ],
-                    ),
-                ),
-            ],
-        ),
-    )
 
 
 def _vints_backup_placement():
@@ -155,7 +125,7 @@ def register(namespace):
         opts=pulumi.ResourceOptions(depends_on=[namespace]),
     )
 
-    # World/data lives on the replicated StorageClass so it survives a node death.
+    # World data on linstor-r2.
     vints_data = k8s.core.v1.PersistentVolumeClaim(
         "vints-data",
         metadata=ObjectMetaArgs(name="vints-data", namespace=NAMESPACE),
@@ -169,8 +139,7 @@ def register(namespace):
         opts=pulumi.ResourceOptions(depends_on=[namespace]),
     )
 
-    # the init container only syncs mods every pod start (the game is baked into the image)
-    # the main container then runs the server as PID 1.
+    # Init syncs mods; main runs server.
     vints = k8s.apps.v1.Deployment(
         "vints",
         metadata=ObjectMetaArgs(
@@ -195,12 +164,9 @@ def register(namespace):
                     annotations={"reloader.stakater.com/last-reloaded-from": "unset"},
                 ),
                 spec=k8s.core.v1.PodSpecArgs(
-                    affinity=_vints_preferred_nodes(),
+                    priority_class_name="app-medium",
                     termination_grace_period_seconds=30,
-                    # The apiserver injects a 300s not-ready/unreachable toleration by default; a dead
-                    # node then means ~6 minutes of downtime before the pod is rescheduled onto the
-                    # other replica. 60s keeps a real node loss short and still rides out a kubelet
-                    # restart or a blip, which would otherwise force a full server restart.
+                    # 60s toleration: fast node-loss recovery.
                     tolerations=[
                         k8s.core.v1.TolerationArgs(
                             key="node.kubernetes.io/not-ready",
@@ -224,9 +190,7 @@ def register(namespace):
                         k8s.core.v1.LocalObjectReferenceArgs(name="vints-regcred"),
                     ],
                     init_containers=[
-                        # Seeds /data/.vints-mods/seed from the CI-baked bundle, so the resolver
-                        # installs the pinned set from the depot without fetching from the Mod DB.
-                        # Strict on purpose: a bundle that cannot be staged must fail the pod loudly.
+                        # Seeds mods from CI bundle.
                         k8s.core.v1.ContainerArgs(
                             name="vints-mods-seed",
                             image=VINTS_MODS_IMAGE,
@@ -285,11 +249,7 @@ def register(namespace):
                             image_pull_policy="Always",
                             command=["/entrypoints/start-vints.sh"],
                             env=_vints_env(),
-                            # Console: `kubectl exec -it deploy/vints -c vints -- vints-console`
-                            # (interactive) or `... -- vints-console /list clients` (one-shot).
-                            # Deliberately no tty/stdin here: a tty client that disconnects sends EOF,
-                            # which .NET latches and which mutes the server's console reader for the rest
-                            # of the pod's life (start-vints.sh feeds stdin from the FIFO instead).
+                            # Console FIFO, no tty.
                             security_context=k8s.core.v1.SecurityContextArgs(
                                 run_as_non_root=True,
                                 allow_privilege_escalation=False,
@@ -388,7 +348,7 @@ def register(namespace):
         opts=pulumi.ResourceOptions(depends_on=[namespace, vints]),
     )
 
-    # The backup job stops the server, so it may scale this Deployment and watch its pods.
+    # Backup may scale the Deployment.
     vints_backup_sa = k8s.core.v1.ServiceAccount(
         "vints-backup",
         metadata=ObjectMetaArgs(name="vints-backup", namespace=NAMESPACE),
@@ -427,8 +387,7 @@ def register(namespace):
         opts=pulumi.ResourceOptions(depends_on=[vints_backup_sa, vints_backup_role]),
     )
 
-    # Nightly: stop the Deployment, tar the world to NFS, start it again.
-    # 00:00 America/New_York, so DST is the cluster's job.
+    # Nightly backup to NFS.
     vints_backup = k8s.batch.v1.CronJob(
         "vints-backup",
         metadata=ObjectMetaArgs(name="vints-backup", namespace=NAMESPACE),
@@ -467,7 +426,7 @@ def register(namespace):
                                         {"name": "BACKUP_DEST", "value": "/backups"},
                                         {"name": "NAMESPACE", "value": NAMESPACE},
                                         {"name": "DEPLOYMENT", "value": "vints"},
-                                        # kubectl needs a writable HOME; the rootfs is read-only.
+                                        # Writable HOME for kubectl.
                                         {"name": "HOME", "value": "/tmp"},
                                     ],
                                     resources=k8s.core.v1.ResourceRequirementsArgs(
@@ -502,7 +461,7 @@ def register(namespace):
                                         claim_name="vints-data"
                                     ),
                                 ),
-                                # Direct NFS mount (kernel client); writable by uid 1001.
+                                # Direct NFS mount, uid 1001.
                                 k8s.core.v1.VolumeArgs(
                                     name="vints-nfs",
                                     nfs=k8s.core.v1.NFSVolumeSourceArgs(

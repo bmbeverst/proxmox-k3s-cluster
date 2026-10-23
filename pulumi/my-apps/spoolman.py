@@ -1,9 +1,8 @@
-"""Spoolman filament-spool manager (own `spoolman` namespace).
+"""Spoolman filament-spool manager, own `spoolman` namespace.
 
-- Upstream image, pinned in `versions.yaml`. SQLite only, no DB service.
-- Spoolman has no auth. LAN VIP only (10.10.1.63), never off the local network.
-- Measured ~107 MiB idle, one uvicorn process. FilaMan used ~377 MiB, ten.
-- Nightly CronJob snapshots to NFS. WAL mode forbids plain file copies.
+- Upstream image, pinned in `versions.yaml`. SQLite, no DB service.
+- LAN VIP only (10.10.1.63), no auth.
+- Nightly CronJob snapshots to NFS. WAL mode.
 """
 
 import os
@@ -17,7 +16,7 @@ from pulumi_kubernetes.meta.v1 import ObjectMetaArgs
 with open(os.path.join(os.path.dirname(__file__), "..", "versions.yaml")) as f:
     _versions = yaml.safe_load(f)
 
-# Read from repo, not baked in image: changes ship from git, no registry push.
+# Read from repo; changes ship via git.
 with open(
     os.path.join(os.path.dirname(__file__), "pod-scripts", "spoolman-backup.py")
 ) as f:
@@ -28,58 +27,27 @@ SPOOLMAN_IMAGE = f"ghcr.io/donkie/spoolman:{_versions['spoolman_image_tag']}"
 NAMESPACE = "spoolman"
 
 SPOOLMAN_PORT = 8000
-# Image's `app` user. Entrypoint gosu-drops root to this uid; volume must be writable.
+# Image `app` user; gosu-drops from root.
 SPOOLMAN_UID = 1000
-# Holds spoolman.db. Upstream warns if this is not a mounted volume.
+# Holds spoolman.db.
 SPOOLMAN_DATA_DIR = "/home/app/.local/share/spoolman"
 SPOOLMAN_DATA_SIZE = "1Gi"
-# kube-vip LoadBalancer VIP (static), local network only. Taken: .60 traefik,
-# .62 paseo, .90 ghost, .91 vints, .99 control-plane; pool is .61-.80.
+# kube-vip LB VIP, LAN only.
 SPOOLMAN_LB_IP = "10.10.1.63"
-# Spoolman's DNS-rebinding guard. The VIP literal is allowed anyway, but naming it
-# keeps the log honest and lets a future DNS name be added in one place.
+# DNS-rebinding guard allowlist.
 SPOOLMAN_ALLOWED_HOST = SPOOLMAN_LB_IP
-# Same NFS export as vints; own subdir so the two prune independently.
-SPOOLMAN_NFS_SERVER = "10.10.1.101"  # host serving the backup export
+# Same NFS export as vints, own subdir.
+SPOOLMAN_NFS_SERVER = "10.10.1.101"
 SPOOLMAN_NFS_PATH = "/pvebackup/spoolman"
-# Export is granted to vints' gid 1001, not Spoolman's 1000. Backup pod joins it.
+# Backup joins via vints gid 1001.
 VINTS_NFS_GID = 1001
 SPOOLMAN_BACKUP_KEEP = 7
 
-# 2026-10-22 redesign: the diskful spoolman-data replica lives on node5
-# (worker, file-thin local disk). Preferred, not pinned.
-SPOOLMAN_PREFERRED_NODES = ["node5"]
-
-
-def _spoolman_preferred_nodes():
-    """Prefer the node holding the diskful spoolman-data replica, without pinning."""
-    return k8s.core.v1.AffinityArgs(
-        node_affinity=k8s.core.v1.NodeAffinityArgs(
-            preferred_during_scheduling_ignored_during_execution=[
-                k8s.core.v1.PreferredSchedulingTermArgs(
-                    weight=100,
-                    preference=k8s.core.v1.NodeSelectorTermArgs(
-                        match_expressions=[
-                            k8s.core.v1.NodeSelectorRequirementArgs(
-                                key="kubernetes.io/hostname",
-                                operator="In",
-                                values=SPOOLMAN_PREFERRED_NODES,
-                            ),
-                        ],
-                    ),
-                ),
-            ],
-        ),
-    )
-
 
 def register(namespace):
-    """Create PVC, Deployment, LAN Service and backup CronJob.
+    """Create PVC, Deployment, Service, backup CronJob."""
 
-    `namespace` is owned by __main__.py. Infra ordering is PKO `spec.prerequisites`.
-    """
-
-    # One SQLite file. linstor-r2 (autoPlace: 2) survives losing a node.
+    # SQLite on linstor-r2, survives node loss.
     spoolman_storage = k8s.core.v1.PersistentVolumeClaim(
         "spoolman-data",
         metadata=ObjectMetaArgs(name="spoolman-data", namespace=NAMESPACE),
@@ -98,7 +66,7 @@ def register(namespace):
         metadata=ObjectMetaArgs(name="spoolman", namespace=NAMESPACE),
         spec=k8s.apps.v1.DeploymentSpecArgs(
             replicas=1,
-            # RWO volume: delete-then-create, never two writers on one SQLite file.
+            # RWO: maxSurge=0 avoids double writers.
             strategy=k8s.apps.v1.DeploymentStrategyArgs(
                 type="RollingUpdate",
                 rolling_update=k8s.apps.v1.RollingUpdateDeploymentArgs(
@@ -109,6 +77,7 @@ def register(namespace):
             template=k8s.core.v1.PodTemplateSpecArgs(
                 metadata=ObjectMetaArgs(labels={"app": "spoolman"}),
                 spec=k8s.core.v1.PodSpecArgs(
+                    priority_class_name="app-low",
                     # Must start as root: entrypoint chowns data dir, then gosu-drops.
                     # No run_as_non_root. fs_group covers the PVC until that chown.
                     security_context=k8s.core.v1.PodSecurityContextArgs(
@@ -300,7 +269,6 @@ def register(namespace):
                                     ],
                                 ),
                             ],
-                            affinity=_spoolman_preferred_nodes(),
                             volumes=[
                                 k8s.core.v1.VolumeArgs(
                                     name="spoolman-data",

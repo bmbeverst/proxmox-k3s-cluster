@@ -1,6 +1,8 @@
-"""Ghost blog deployed on the k3s cluster (its own `ghost` namespace).
+"""Ghost blog on k3s, own `ghost` namespace.
 
-- SQLite-backed (no DB service; follows the locked-in decision).
+- SQLite-backed, no DB service.
+- Content on linstor-r2 PVC.
+- LB via kube-vip VIP.
 """
 
 import os
@@ -17,54 +19,14 @@ GHOST_IMAGE = f"ghost:{_versions['ghost_image_tag']}"
 
 NAMESPACE = "ghost"
 
-# One canonical URL for Ghost, served through the kube-vip LoadBalancer VIP.
+# Ghost URL via kube-vip VIP.
 GHOST_LB_IP = "10.10.1.90"
 GHOST_URL = f"http://{GHOST_LB_IP}"
 
-# The nodes holding a diskful ghost-content replica. 2026-10-22 redesign: the
-# replica lives on node6 (worker, file-thin local disk); node1 is the diskless
-# tiebreaker. Revisit if the volume is ever re-placed.
-GHOST_PREFERRED_NODES = ["node6"]
-
-
-def _ghost_preferred_nodes():
-    """Prefer the nodes holding a diskful ghost-content replica, without pinning.
-
-    A hard nodeSelector used to pin Ghost to node3 alone, so a node loss left it
-    unschedulable and the choice went stale whenever LINSTOR re-placed the
-    replicas. Preferred affinity keeps the local-disk bias while still letting
-    the pod move (e.g. a kured reboot).
-    """
-    return k8s.core.v1.AffinityArgs(
-        node_affinity=k8s.core.v1.NodeAffinityArgs(
-            preferred_during_scheduling_ignored_during_execution=[
-                k8s.core.v1.PreferredSchedulingTermArgs(
-                    weight=100,
-                    preference=k8s.core.v1.NodeSelectorTermArgs(
-                        match_expressions=[
-                            k8s.core.v1.NodeSelectorRequirementArgs(
-                                key="kubernetes.io/hostname",
-                                operator="In",
-                                values=GHOST_PREFERRED_NODES,
-                            ),
-                        ],
-                    ),
-                ),
-            ],
-        ),
-    )
-
-
 def register(namespace):
-    """Create the Ghost workload, its content PVC and the LoadBalancer Service.
+    """Create workload, PVC, LB Service."""
 
-    `namespace` is the `ghost` Namespace resource owned by __main__.py.
-    Ordering after the infra stacks is handled by PKO's Stack CR
-    `spec.prerequisites`, so workloads here only depend on `namespace`.
-    """
-
-    # Ghost content lives in /var/lib/ghost/content; SQLite DB at .../content/data/ghost.db.
-    # Use linstor-r2 (autoPlace: 2, allowRemoteVolumeAccess) so state survives node loss.
+    # Content at /var/lib/ghost/content, SQLite inside. linstor-r2.
     ghost_storage = k8s.core.v1.PersistentVolumeClaim(
         "ghost-content",
         metadata=ObjectMetaArgs(name="ghost-content", namespace=NAMESPACE),
@@ -83,10 +45,7 @@ def register(namespace):
         metadata=ObjectMetaArgs(name="ghost", namespace=NAMESPACE),
         spec=k8s.apps.v1.DeploymentSpecArgs(
             replicas=1,
-            # One replica on a ReadWriteOnce volume: delete-then-create, never two
-            # writers. The default surge=1 leaves the replacement Pending on
-            # FailedAttachVolume ("already used by pod"), because the old pod
-            # cannot release the volume until the new one is ready.
+            # RWO: maxSurge=0 avoids FailedAttachVolume.
             strategy=k8s.apps.v1.DeploymentStrategyArgs(
                 type="RollingUpdate",
                 rolling_update=k8s.apps.v1.RollingUpdateDeploymentArgs(
@@ -97,6 +56,7 @@ def register(namespace):
             template=k8s.core.v1.PodTemplateSpecArgs(
                 metadata=ObjectMetaArgs(labels={"app": "ghost"}),
                 spec=k8s.core.v1.PodSpecArgs(
+                    priority_class_name="app-high",
                     containers=[
                         k8s.core.v1.ContainerArgs(
                             name="ghost",
@@ -150,7 +110,6 @@ def register(namespace):
                             ],
                         ),
                     ],
-                    affinity=_ghost_preferred_nodes(),
                     volumes=[
                         k8s.core.v1.VolumeArgs(
                             name="ghost-content",

@@ -1,4 +1,4 @@
-"""These are the apps that are setup to run the cluster infrastructure"""
+"""Cluster infra: SUC, kube-vip, LINSTOR, cert-manager, monitoring."""
 
 import os
 import urllib.request
@@ -11,16 +11,13 @@ from pulumi import ResourceOptions
 from pulumi_kubernetes.apiextensions import CustomResource
 from pulumi_kubernetes.yaml.v2 import ConfigFile
 
-# The system-upgrade-controller release tag lives in ../versions.yaml (the only
-# non-Helm version there), bumped by Renovate's single regex customManager
-# (managerFilePatterns: /pulumi/versions\.yaml$/).
+# SUC version from versions.yaml.
 with open(os.path.join(os.path.dirname(__file__), "..", "versions.yaml")) as f:
     _versions = yaml.safe_load(f)
 
 SUC_VERSION = _versions["suc_version"]
 
-# All helm chart repos/versions (HTTP and OCI) live in ../Chart.yaml so
-# Renovate's built-in helmv3 manager can bump them natively.
+# Helm chart versions from Chart.yaml.
 with open(os.path.join(os.path.dirname(__file__), "..", "Chart.yaml")) as f:
     _chart_deps = {d["name"]: d for d in yaml.safe_load(f)["dependencies"]}
 
@@ -85,8 +82,7 @@ suc = k8s.yaml.v2.ConfigFile(
     ),
 )
 
-# kube-vip-cloud-controller: assigns IPs from a pool to LoadBalancer services
-# that don't request one (e.g. kube-vip DS advertises addresses; this allocates).
+# Assigns pool IPs to LB services.
 kvcp = k8s.yaml.v2.ConfigFile(
     "kube-vip-cloud-controller",
     file=f"https://raw.githubusercontent.com/kube-vip/kube-vip-cloud-provider/{_versions['kvcp_version']}/manifest/kube-vip-cloud-controller.yaml",
@@ -111,16 +107,11 @@ server_plan = CustomResource(
     spec={
         "concurrency": 1,
         "cordon": True,
-        # Drain the pods off the node before restart k3s
-        # cordon is automatically handled
+        # Drain pods before k3s restart.
         "drain": {
-            # Delete manually started pods instead of
-            # failing the drain. Default --ignore-daemonsets and
-            # --delete-emptydir-data
+            # Force-delete pods on drain.
             "force": True,
-            # PodDisruptionBudget can refuse evictions
-            # causing the upgrade to hang, directly delete pods
-            # but will kill after terminationGracePeriodSeconds
+            # Delete pods if PDB blocks drain.
             "disableEviction": True,
             "skipWaitForDeleteTimeout": 60,
         },
@@ -151,9 +142,7 @@ agent_plan = CustomResource(
         "namespace": "system-upgrade",
     },
     spec={
-        # This is the same plan as the server-plan
-        # but with nodeSelector updated to exclude control-plane nodes.
-        # Currently no worker nodes :(
+        # Agent plan: worker nodes only.
         "concurrency": 1,
         "cordon": True,
         "drain": {
@@ -182,8 +171,7 @@ agent_plan = CustomResource(
     opts=ResourceOptions(depends_on=[server_plan]),
 )
 
-# Kured reboots nodes when update-engine touches /run/reboot-required
-# chart defaults handle the sentinel path and control-plane taints.
+# Kured: reboot on update-engine signal.
 kured = k8s.helm.v3.Release(
     "kured",
     k8s.helm.v3.ReleaseArgs(
@@ -208,6 +196,46 @@ kured = k8s.helm.v3.Release(
 )
 
 
+# No auto-place on control-plane.
+satellite_no_autoplace_cp = CustomResource(
+    "no-autoplace-on-cp",
+    api_version="piraeus.io/v1",
+    kind="LinstorSatelliteConfiguration",
+    metadata={"name": "no-autoplace-on-cp"},
+    spec={
+        "nodeAffinity": {
+            "nodeSelectorTerms": [
+                {
+                    "matchExpressions": [
+                        {
+                            "key": "node-role.kubernetes.io/control-plane",
+                            "operator": "Exists",
+                        }
+                    ]
+                }
+            ]
+        },
+        "properties": [
+            {"name": "AutoplaceTarget", "value": "false"},
+        ],
+    },
+)
+
+
+# PriorityClasses for preemption.
+for _pc_name, _pc_value in [
+    ("app-high", "1000000"),
+    ("app-medium", "100000"),
+    ("app-low", "10000"),
+]:
+    k8s.scheduling.v1.PriorityClass(
+        _pc_name,
+        metadata={"name": _pc_name},
+        value=int(_pc_value),
+        global_default=False,
+        preemption_policy="PreemptLowerPriority",
+    )
+
 # kube-vip: HA control plane and Service LoadBalancer support.
 kube_vip = k8s.helm.v3.Release(
     "kube-vip",
@@ -220,6 +248,17 @@ kube_vip = k8s.helm.v3.Release(
         ),
         values={
             "config": {"address": "10.10.1.99"},
+            # Restrict to control-plane.
+            "nodeSelector": {
+                "node-role.kubernetes.io/control-plane": "true",
+            },
+            "tolerations": [
+                {
+                    "key": "node-role.kubernetes.io/control-plane",
+                    "operator": "Exists",
+                    "effect": "NoSchedule",
+                },
+            ],
             "env": {
                 "vip_interface": "eth0",
                 "vip_arp": "true",
@@ -348,9 +387,7 @@ cert_manager = k8s.helm.v3.Release(
     ),
 )
 
-# --- TLS: Cloudflare DNS-01, one wildcard for the whole zone -----------------
-# CT logs every publicly trusted certificate, so every hostname shares a single
-# wildcard: only "*.lenatin.org" is published, never individual hostnames.
+# Cloudflare DNS-01 wildcard cert.
 _tls_cfg = pulumi.Config()
 _acme_email = _tls_cfg.require_secret("acmeEmail")
 
@@ -405,8 +442,7 @@ letsencrypt_dns = _acme_issuer(
     "https://acme-v02.api.letsencrypt.org/directory",
 )
 
-# One wildcard Certificate (+ apex), stored in Traefik's namespace so it can be
-# the default store. Issued by the prod issuer; staging is kept for future tests.
+# Wildcard cert in Traefik ns.
 wildcard_cert = CustomResource(
     "wildcard-lenatin-org",
     api_version="cert-manager.io/v1",
@@ -421,7 +457,7 @@ wildcard_cert = CustomResource(
     opts=ResourceOptions(depends_on=[letsencrypt_dns]),
 )
 
-# Every Ingress gets the wildcard, so no per-host certificate is ever requested.
+# All Ingresses use the wildcard.
 traefik_default_tls = CustomResource(
     "traefik-default-tls-store",
     api_version="traefik.io/v1alpha1",
@@ -431,11 +467,7 @@ traefik_default_tls = CustomResource(
     opts=ResourceOptions(depends_on=[wildcard_cert]),
 )
 
-# --- Origin lock-down: only Cloudflare may complete TLS ----------------------
-# Global Authenticated Origin Pulls is enabled on the zone, so Cloudflare presents
-# a client certificate signed by this CA. Traefik applies the TLSOption named
-# "default" to every router that does not name one, so new Ingresses are covered.
-# The docs host 403s the default Python user-agent, so send an explicit one.
+# Cloudflare origin lock-down.
 _CF_ORIGIN_PULL_CA_URL = (
     "https://developers.cloudflare.com/ssl/static/authenticated_origin_pull_ca.pem"
 )
@@ -466,9 +498,7 @@ cloudflare_origin_pull = CustomResource(
     opts=ResourceOptions(depends_on=[cloudflare_origin_pull_ca]),
 )
 
-# --- DDNS: keeps www.lenatin.org pointed at the WAN IP ----------------------
-# favonia/cloudflare-ddns creates the record if missing and only rewrites it when
-# the IP changes. The token is zone-scoped (Zone:DNS:Edit + Zone:Zone:Read).
+# DDNS for www.lenatin.org.
 ddns_namespace = k8s.core.v1.Namespace(
     "cloudflare-ddns",
     metadata={"name": "cloudflare-ddns"},
@@ -539,7 +569,7 @@ cloudflare_ddns = k8s.apps.v1.Deployment(
     opts=ResourceOptions(depends_on=[ddns_namespace, ddns_token]),
 )
 
-# VictoriaMetrics Single Prometheus-compatible TSDB with built-in scraping for KRR.
+# VictoriaMetrics TSDB for KRR.
 vmsingle = k8s.helm.v3.Release(
     "vmsingle",
     k8s.helm.v3.ReleaseArgs(
@@ -554,8 +584,7 @@ vmsingle = k8s.helm.v3.Release(
             "server": {
                 "retentionPeriod": "60d",
                 "extraArgs": {"promscrape.configCheckInterval": "1m"},
-                # 2026-10-22 redesign: prefer node6, where the diskful vmsingle
-                # volume replica lives (file-thin local disk).
+                # Prefer node6 (diskful replica).
                 "affinity": {
                     "nodeAffinity": {
                         "preferredDuringSchedulingIgnoredDuringExecution": [
@@ -583,7 +612,7 @@ vmsingle = k8s.helm.v3.Release(
                                 "job_name": "victoriametrics",
                                 "static_configs": [{"targets": ["localhost:8428"]}],
                             },
-                            # kubelet cAdvisor — KRR queries this for container CPU/memory usage
+                            # kubelet cAdvisor for KRR.
                             {
                                 "job_name": "kubelet",
                                 "kubernetes_sd_configs": [{"role": "node"}],
@@ -628,7 +657,7 @@ vmsingle = k8s.helm.v3.Release(
                                     },
                                 ],
                             },
-                            # kube-state-metrics — KRR needs this for workload ownership/status
+                            # kube-state-metrics for KRR.
                             {
                                 "job_name": "kube-state-metrics",
                                 "kubernetes_sd_configs": [{"role": "endpoints"}],
@@ -676,12 +705,11 @@ vmsingle = k8s.helm.v3.Release(
                 },
             },
         },
-        # 600s: linstor-r2 uses WaitForFirstConsumer — PVC binding adds latency
-        # before the StatefulSet pod becomes Ready.
+        # 600s for PVC binding latency.
         timeout=600,
     ),
 )
-# kube-state-metrics — workload ownership/status metrics KRR needs
+# kube-state-metrics for KRR.
 kube_state_metrics = k8s.helm.v3.Release(
     "kube-state-metrics",
     k8s.helm.v3.ReleaseArgs(
@@ -703,8 +731,7 @@ kube_state_metrics = k8s.helm.v3.Release(
     ),
 )
 
-# Reloader: Rolls a workload when its ConfigMap or Secrets changes
-# Annotation: reloader.stakater.com/auto: "true"
+# Reloader: restart on ConfigMap change.
 reloader = k8s.helm.v3.Release(
     "reloader",
     k8s.helm.v3.ReleaseArgs(
@@ -731,8 +758,7 @@ reloader = k8s.helm.v3.Release(
     ),
 )
 
-# Tailscale operator. Auth is the OAuth client in stack config (tailscale:clientID /
-# tailscale:clientSecret); the chart also installs the tailscale.com CRDs.
+# Tailscale operator.
 _tailscale_cfg = pulumi.Config("tailscale")
 
 tailscale_operator = k8s.helm.v3.Release(
@@ -764,8 +790,7 @@ tailscale_operator = k8s.helm.v3.Release(
 )
 
 
-# Subnet router: advertises the cluster subnet to the tailnet so tagged devices reach
-# 10.10.1.x (kube-vip VIP + nodes). The route must be approved in the tailnet policy.
+# Subnet router for tailnet.
 subnet_router = CustomResource(
     "subnet-router",
     api_version="tailscale.com/v1alpha1",

@@ -1,14 +1,9 @@
-"""Paseo (daemon + web UI) driving this repo, on k3s in its own `paseo` namespace.
+"""Paseo daemon + web UI, own `paseo` namespace.
 
-- Image built from `containers/paseo/`, tag pinned in `versions.yaml`: Cline, Pulumi, uv, the
-  `dangerous-command-guard` plugin (installed into `~/.cline` at start) and `paseo-ops-panel`.
-- The init container runs `pod-scripts/paseo-init.sh`: read from the repo at run time (not baked
-  into the image) and env-driven, so changes to it ship from git without a registry push.
-- `paseo-home` keeps daemon state, Cline credentials and guard grants; `paseo-workspace`
-  is the repos directory (this repo under `proxmox-k3s-cluster/`).
-- Secrets: `paseoPassword` (daemon bearer token), `paseoClineProviders` (ClinePass bundle),
-  `paseoGitToken` (clone + agent pushes, needs `write_repository`), `pulumiAccessToken` (panel preview).
-- Hands-off: merge to `main`, PKO applies. Nothing applied by hand.
+- Image from `containers/paseo/`, pinned in `versions.yaml`.
+- Init runs `pod-scripts/paseo-init.sh` from repo.
+- `paseo-home`: state, credentials. `paseo-workspace`: repos.
+- Secrets: paseoPassword, paseoClineProviders, paseoGitToken, pulumiAccessToken.
 """
 
 import base64
@@ -31,18 +26,16 @@ PASEO_REGISTRY_IMAGE_ROOT = f"{PASEO_REGISTRY}/proxmox-k3s/proxmox-k3s-cluster"
 PASEO_IMAGE = f"{PASEO_REGISTRY_IMAGE_ROOT}/paseo:{_versions['paseo_image_tag']}"
 
 PASEO_PORT = 6767
-# kube-vip LoadBalancer VIP (static). .60 traefik, .90 ghost and .91 vints are taken.
+# kube-vip LB VIP.
 PASEO_LB_IP = "10.10.1.62"
 
-# Repos cloned into the workspace PVC, one directory each. The token arrives via GIT_CONFIG_*
-# env and is never written to .git/config; the single token must reach every repo listed here.
+# Repos cloned into workspace PVC.
 PASEO_REPOS = [
     "https://gitlab.com/proxmox-k3s/proxmox-k3s-cluster.git",
     "https://gitlab.com/Reed-DRB/galactic-phos.git",
 ]
 PASEO_WORKSPACE = "/workspace"
-# The clone lives one level down, so the PVC is a repos directory rather than a single checkout.
-# Paseo projects are registered at a repo dir; it is also the panel cwd, so the first repo leads.
+# Clone lives one level down.
 PASEO_REPO_DIRS = [
     f"{PASEO_WORKSPACE}/{url.rstrip('/').rsplit('/', 1)[-1].removesuffix('.git')}"
     for url in PASEO_REPOS
@@ -50,42 +43,13 @@ PASEO_REPO_DIRS = [
 PASEO_REPO_DIR = PASEO_REPO_DIRS[0]
 PASEO_HOME_DIR = "/home/paseo"
 
-# The image's entrypoint copies this file into ~/.cline/data/settings/providers.json (fatal if absent).
-# Not under /run/secrets: the kubelet mounts its SA token there read-only.
+# Entrypoint copies to providers.json.
 PASEO_CLINE_SEED_PATH = "/etc/paseo-secrets/cline-providers.json"
 
-# uid/gid the image runs as (`paseo`); the init container hands the volumes over.
+# Image `paseo` uid/gid.
 PASEO_UID = 1000
-# Passed to paseo-init.sh as its single chown target.
+# Init chown target.
 PASEO_OWNER = f"{PASEO_UID}:{PASEO_UID}"
-
-# 2026-10-22 redesign: the diskful paseo-home/workspace replicas live on node5
-# (worker, file-thin local disk). Preferred, not pinned, so the pod can still
-# move (it then attaches diskless until the node returns).
-PASEO_PREFERRED_NODES = ["node5"]
-
-
-def _paseo_preferred_nodes():
-    """Prefer the node holding the diskful paseo replicas, without pinning."""
-    return k8s.core.v1.AffinityArgs(
-        node_affinity=k8s.core.v1.NodeAffinityArgs(
-            preferred_during_scheduling_ignored_during_execution=[
-                k8s.core.v1.PreferredSchedulingTermArgs(
-                    weight=100,
-                    preference=k8s.core.v1.NodeSelectorTermArgs(
-                        match_expressions=[
-                            k8s.core.v1.NodeSelectorRequirementArgs(
-                                key="kubernetes.io/hostname",
-                                operator="In",
-                                values=PASEO_PREFERRED_NODES,
-                            ),
-                        ],
-                    ),
-                ),
-            ],
-        ),
-    )
-
 
 _paseo_cfg = pulumi.Config("my-apps")
 _paseo_registry_user = _paseo_cfg.require_secret("vintsRegistryReadUser")
@@ -137,16 +101,14 @@ def _paseo_git_env(token):
     return env
 
 
-# Pod-side scripts sit outside the image's build context, so reading them here keeps them
-# manifest-carried: PKO ships a change to one without an image rebuild.
+# Pod-side scripts, read from repo.
 _POD_SCRIPTS = os.path.join(os.path.dirname(__file__), "pod-scripts")
 
-# Runs in the init container (see its env below) before the daemon.
+# Init container script.
 with open(os.path.join(_POD_SCRIPTS, "paseo-init.sh")) as f:
     PASEO_INIT_SCRIPT = f.read()
 
-# Runs as the app container's postStart hook, which is the first moment a daemon exists to
-# register repos with.
+# PostStart: registers repos.
 with open(os.path.join(_POD_SCRIPTS, "paseo-register-projects.sh")) as f:
     PASEO_REGISTER_SCRIPT = f.read()
 
@@ -176,7 +138,7 @@ def register(namespace):
         opts=pulumi.ResourceOptions(depends_on=[namespace]),
     )
 
-    # Seed providers.json with cline plus cline-pass only; other providers' keys stay off-cluster.
+    # Seed cline providers only.
     paseo_cline_secret = k8s.core.v1.Secret(
         "paseo-cline-providers",
         metadata=ObjectMetaArgs(name="paseo-cline-providers", namespace=NAMESPACE),
@@ -184,7 +146,7 @@ def register(namespace):
         opts=pulumi.ResourceOptions(depends_on=[namespace]),
     )
 
-    # linstor-r2 (autoPlace: 2) survives a node loss. ReadWriteOnce: one replica only.
+    # linstor-r2, survives node loss.
     paseo_home = k8s.core.v1.PersistentVolumeClaim(
         "paseo-home",
         metadata=ObjectMetaArgs(name="paseo-home", namespace=NAMESPACE),
@@ -217,7 +179,7 @@ def register(namespace):
         opts=pulumi.ResourceOptions(depends_on=[namespace]),
     )
 
-    # Read-only ClusterRole: panel previews, and no apply path from this shell pod.
+    # Read-only ClusterRole.
     paseo_read = k8s_rbac.v1.ClusterRole(
         "paseo-read",
         metadata=ObjectMetaArgs(name="paseo-read"),
@@ -252,7 +214,7 @@ def register(namespace):
         ),
         spec=k8s.apps.v1.DeploymentSpecArgs(
             replicas=1,
-            # One replica on ReadWriteOnce volumes: delete-then-create, never two writers.
+            # RWO: maxSurge=0.
             strategy=k8s.apps.v1.DeploymentStrategyArgs(
                 type="RollingUpdate",
                 rolling_update=k8s.apps.v1.RollingUpdateDeploymentArgs(
@@ -267,9 +229,10 @@ def register(namespace):
                     annotations={"reloader.stakater.com/last-reloaded-from": "unset"},
                 ),
                 spec=k8s.core.v1.PodSpecArgs(
+                    priority_class_name="app-medium",
                     service_account_name="paseo",
                     termination_grace_period_seconds=30,
-                    # Group ownership for the volumes, so uid 1000 can write a fresh PVC.
+                    # fsGroup for PVC writes.
                     security_context=k8s.core.v1.PodSecurityContextArgs(
                         fs_group=PASEO_UID,
                     ),
@@ -277,7 +240,7 @@ def register(namespace):
                         k8s.core.v1.LocalObjectReferenceArgs(name="paseo-regcred"),
                     ],
                     init_containers=[
-                        # Root only: chown the PVC, clone, then drop to uid 1000.
+                        # Root: chown, clone, drop.
                         k8s.core.v1.ContainerArgs(
                             name="workspace",
                             image=PASEO_IMAGE,
@@ -285,15 +248,14 @@ def register(namespace):
                             command=["/bin/sh", "-c"],
                             args=[PASEO_INIT_SCRIPT],
                             env=[
-                                # Env-driven, so the script file stays static.
+                                # Env-driven; script static.
                                 {"name": "PASEO_OWNER", "value": PASEO_OWNER},
                                 {"name": "PASEO_HOME_DIR", "value": PASEO_HOME_DIR},
                                 {"name": "PASEO_WORKSPACE", "value": PASEO_WORKSPACE},
                                 {"name": "PASEO_REPOS", "value": " ".join(PASEO_REPOS)},
                                 *_paseo_git_env(_paseo_git_token),
                             ],
-                            # Whole phase measures 12s for two ~50MB clones, so the request only
-                            # keeps the container off BestEffort.
+                            # Request keeps off BestEffort.
                             resources=k8s.core.v1.ResourceRequirementsArgs(
                                 requests={"cpu": "100m", "memory": "128Mi"},
                                 limits={"cpu": "1000m", "memory": "512Mi"},
@@ -335,7 +297,7 @@ def register(namespace):
                                         )
                                     ),
                                 ),
-                                # The ops panel resolves the guard binary at plugin load.
+                                # Guard binary for panel.
                                 {
                                     "name": "CLINE_GUARD_BIN",
                                     "value": "/opt/dangerous-command-guard/cline-approve-dangerous",
@@ -349,16 +311,14 @@ def register(namespace):
                                     "name": "GIT_AUTHOR_EMAIL",
                                     "value": "paseo@localhost",
                                 },
-                                # What the postStart hook below registers.
+                                # PostStart registers these.
                                 {
                                     "name": "PASEO_REPO_DIRS",
                                     "value": " ".join(PASEO_REPO_DIRS),
                                 },
                                 *_paseo_git_env(_paseo_git_token),
                             ],
-                            # Cannot live in the init container: the daemon is started by the
-                            # entrypoint, so there is nothing to register with until this
-                            # container is up. The script always exits 0.
+                            # PostStart: daemon not in init.
                             lifecycle=k8s.core.v1.LifecycleArgs(
                                 post_start=k8s.core.v1.LifecycleHandlerArgs(
                                     exec_=k8s.core.v1.ExecActionArgs(
@@ -371,7 +331,7 @@ def register(namespace):
                                     name="http", container_port=PASEO_PORT
                                 ),
                             ],
-                            # /api/health is unauthenticated; the daemon seeds volumes first, allow a slow start.
+                            # Slow start: seeds volumes.
                             startup_probe=k8s.core.v1.ProbeArgs(
                                 http_get=k8s.core.v1.HTTPGetActionArgs(
                                     path="/api/health", port=PASEO_PORT
@@ -396,9 +356,7 @@ def register(namespace):
                                 failure_threshold=3,
                                 timeout_seconds=5,
                             ),
-                            # 2026-10-14: OOMKilled at the old 2Gi limit (measured peak 1906MiB
-                            # working set). Request 3Gi keeps it off the eviction queue; the 4Gi
-                            # limit leaves ~1Gi of burst headroom on any 8.72GiB node.
+                            # Request 3Gi, limit 4Gi.
                             resources=k8s.core.v1.ResourceRequirementsArgs(
                                 requests={"cpu": "250m", "memory": "3Gi"},
                                 limits={"cpu": "2000m", "memory": "4Gi"},
@@ -424,7 +382,6 @@ def register(namespace):
                             ],
                         ),
                     ],
-                    affinity=_paseo_preferred_nodes(),
                     volumes=[
                         k8s.core.v1.VolumeArgs(
                             name="paseo-home",
@@ -438,7 +395,7 @@ def register(namespace):
                                 claim_name="paseo-workspace"
                             ),
                         ),
-                        # 0444: copied as uid 1000; fsGroup may not reach a projected Secret.
+                        # 0444: projected Secret.
                         k8s.core.v1.VolumeArgs(
                             name="cline-seed",
                             secret=k8s.core.v1.SecretVolumeSourceArgs(
@@ -472,7 +429,7 @@ def register(namespace):
         ),
     )
 
-    # LoadBalancer on a static kube-vip VIP: the bundled web UI and the daemon API.
+    # LB for web UI + API.
     paseo_service = k8s.core.v1.Service(
         "paseo",
         metadata=ObjectMetaArgs(name="paseo", namespace=NAMESPACE),
