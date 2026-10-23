@@ -321,8 +321,7 @@ def register(namespace):
         ),
     )
 
-    # LoadBalancer on static kube-vip VIP. Cluster policy: any node routes to
-    # the pod, so the single CP kube-vip serves it with no per-service config.
+    # Local policy: real client IPs via worker kube-vip VIP.
     vints_service = k8s.core.v1.Service(
         "vints",
         metadata=ObjectMetaArgs(name="vints", namespace=NAMESPACE),
@@ -330,7 +329,7 @@ def register(namespace):
             selector={"app": "vints"},
             type="LoadBalancer",
             load_balancer_ip=VINTS_LB_IP,
-            external_traffic_policy="Cluster",
+            external_traffic_policy="Local",
             ports=[
                 k8s.core.v1.ServicePortArgs(
                     name="game-tcp",

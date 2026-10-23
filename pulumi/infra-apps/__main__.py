@@ -284,6 +284,59 @@ kube_vip = k8s.helm.v3.Release(
     ),
 )
 
+# Worker kube-vip: serves Local-policy LBs with real client IPs.
+# Per-service election stays on; VIP pins to endpoint node.
+kube_vip_lb = k8s.helm.v3.Release(
+    "kube-vip-lb",
+    k8s.helm.v3.ReleaseArgs(
+        chart="kube-vip",
+        version=_chart_deps["kube-vip"]["version"],
+        namespace="kube-system",
+        repository_opts=k8s.helm.v3.RepositoryOptsArgs(
+            repo=_chart_deps["kube-vip"]["repository"],
+        ),
+        values={
+            # nameOverride keeps DS/SA/RBAC names off "kube-vip".
+            "nameOverride": "kube-vip-lb",
+            # Workers only.
+            "affinity": {
+                "nodeAffinity": {
+                    "requiredDuringSchedulingIgnoredDuringExecution": {
+                        "nodeSelectorTerms": [
+                            {
+                                "matchExpressions": [
+                                    {
+                                        "key": "node-role.kubernetes.io/control-plane",
+                                        "operator": "DoesNotExist",
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                }
+            },
+            "env": {
+                "vip_interface": "eth0",
+                "vip_arp": "true",
+                "vip_subnet": "32",
+                "cp_enable": "false",
+                "svc_enable": "true",
+                "svc_election": "true",
+                "vip_leaderelection": "false",
+                "lb_enable": "false",
+            },
+            "envValueFrom": {
+                "vip_nodename": {"fieldRef": {"fieldPath": "spec.nodeName"}},
+            },
+            "resources": {
+                "requests": {"cpu": "10m", "memory": "32Mi"},
+                "limits": {"cpu": "100m", "memory": "64Mi"},
+            },
+        },
+        timeout=600,
+    ),
+)
+
 
 # Piraeus operator first
 piraeus_operator = k8s.helm.v3.Release(
