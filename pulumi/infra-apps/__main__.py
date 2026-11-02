@@ -386,9 +386,12 @@ piraeus = k8s.helm.v3.Release(
                             },
                         },
                     ],
-                    # piraeus Flatcar how-to
+                    # Satellites on host network: DRBD endpoints bind to stable
+                    # node IPs, so pod restarts and reboots self-heal.
                     "podTemplate": {
                         "spec": {
+                            "hostNetwork": True,
+                            "dnsPolicy": "ClusterFirstWithHostNet",
                             "volumes": [
                                 {"name": "usr-src", "$patch": "delete"},
                             ],
