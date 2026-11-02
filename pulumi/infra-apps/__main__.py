@@ -186,6 +186,18 @@ kured = k8s.helm.v3.Release(
             "configuration": {
                 # One node at a time: losing two of three control-plane nodes takes down etcd
                 "concurrency": 1,
+                # Spacing: period caps reboot gap; lockReleaseDelay adds node grace.
+                "period": "2h",
+                "lockReleaseDelay": "30m",
+                # Reboot only if Flatcar update pending AND DRBD healthy.
+                # Gate: drbdadm via satellite ns; /proc/drbd is header-only.
+                "rebootSentinelCommand": (
+                    "sh -c 'test -f /var/run/reboot-required -o -f /sentinel/reboot-required"
+                    " && P=$(pgrep -f core.Satellite | head -1) && [ -n \"$P\" ]"
+                    " && O=$(nsenter -m/proc/$P/ns/mnt -n/proc/$P/ns/net -- /usr/sbin/drbdadm status 2>/dev/null)"
+                    " && ! printf %s \"$O\" | grep -qE \"connection:(StandAlone|Connecting|Disconnecting|WFConnection)"
+                    "|disk:(Inconsistent|Outdated)|suspended:quorum\"'"
+                ),
                 # Abort drain after 10m, kured retries.
                 "drainTimeout": "10m",
                 "skipWaitForDeleteTimeout": 60,
