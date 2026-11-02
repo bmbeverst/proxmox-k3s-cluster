@@ -183,21 +183,22 @@ kured = k8s.helm.v3.Release(
             repo=_chart_deps["kured"]["repository"],
         ),
         values={
-            "configuration": {
-                # One node at a time: losing two of three control-plane nodes takes down etcd
-                "concurrency": 1,
-                # Spacing: period caps reboot gap; lockReleaseDelay adds node grace.
-                "period": "2h",
-                "lockReleaseDelay": "30m",
+            "extraArgs": {
                 # Reboot only if Flatcar update pending AND DRBD healthy.
-                # Gate: drbdadm via satellite ns; /proc/drbd is header-only.
-                "rebootSentinelCommand": (
+                "reboot-sentinel-command": (
                     "sh -c 'test -f /var/run/reboot-required -o -f /sentinel/reboot-required"
                     " && P=$(pgrep -f core.Satellite | head -1) && [ -n \"$P\" ]"
                     " && O=$(nsenter -m/proc/$P/ns/mnt -n/proc/$P/ns/net -- /usr/sbin/drbdadm status 2>/dev/null)"
                     " && ! printf %s \"$O\" | grep -qE \"connection:(StandAlone|Connecting|Disconnecting|WFConnection)"
                     "|disk:(Inconsistent|Outdated)|suspended:quorum\"'"
                 ),
+            },
+            "configuration": {
+                # One node at a time: losing two of three control-plane nodes takes down etcd
+                "concurrency": 1,
+                # Spacing: period caps reboot gap; lockReleaseDelay adds node grace.
+                "period": "2h",
+                "lockReleaseDelay": "30m",
                 # Abort drain after 10m, kured retries.
                 "drainTimeout": "10m",
                 "skipWaitForDeleteTimeout": 60,
@@ -406,9 +407,6 @@ piraeus = k8s.helm.v3.Release(
                             },
                         },
                     ],
-                    # Satellites on host network: DRBD endpoints bind to stable
-                    # node IPs, so pod restarts and reboots self-heal.
-                    # Satellite java -Xmx2G: limit above max heap.
                     "podTemplate": {
                         "spec": {
                             "hostNetwork": True,
@@ -683,11 +681,6 @@ vmsingle = k8s.helm.v3.Release(
         ),
         values={
             "server": {
-                # Was BestEffort; OOM-killed Oct 24. Sized to 60d p99.
-                "resources": {
-                    "requests": {"cpu": "100m", "memory": "768Mi"},
-                    "limits": {"memory": "1Gi"},
-                },
                 "retentionPeriod": "60d",
                 "extraArgs": {"promscrape.configCheckInterval": "1m"},
                 # Prefer node6 (diskful replica).
@@ -807,7 +800,8 @@ vmsingle = k8s.helm.v3.Release(
                     "storageClassName": "linstor-r2",
                 },
                 "resources": {
-                    "requests": {"cpu": "50m", "memory": "512Mi"},
+                    "requests": {"cpu": "100m", "memory": "768Mi"},
+                    "limits": {"memory": "1Gi"},
                 },
             },
         },
