@@ -2,7 +2,12 @@ kubelet-arg:
   - "image-gc-low-threshold=65"
   - "image-gc-high-threshold=75"
   - "system-reserved=cpu=200m,memory=384Mi"
+{% if k3s_role != 'agent' %}
+  # k3s server RSS ~1.65Gi; restarts k3s on apply.
+  - "kube-reserved=cpu=300m,memory=1536Mi"
+{% else %}
   - "kube-reserved=cpu=300m,memory=640Mi"
+{% endif %}
   - "eviction-hard=memory.available<300Mi"
 
 {% if k3s_role != 'agent' %}

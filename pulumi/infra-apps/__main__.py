@@ -375,6 +375,26 @@ piraeus = k8s.helm.v3.Release(
         namespace="piraeus-datastore",
         create_namespace=True,
         values={
+            # LINSTOR brain was BestEffort; no limit (-Xmx8G).
+            "linstorCluster": {
+                "controller": {
+                    "podTemplate": {
+                        "spec": {
+                            "containers": [
+                                {
+                                    "name": "linstor-controller",
+                                    "resources": {
+                                        "requests": {
+                                            "cpu": "500m",
+                                            "memory": "1Gi",
+                                        },
+                                    },
+                                },
+                            ],
+                        },
+                    },
+                },
+            },
             "linstorSatelliteConfigurations": [
                 {
                     "name": "storage-pool",
@@ -388,10 +408,23 @@ piraeus = k8s.helm.v3.Release(
                     ],
                     # Satellites on host network: DRBD endpoints bind to stable
                     # node IPs, so pod restarts and reboots self-heal.
+                    # Satellite java -Xmx2G: limit above max heap.
                     "podTemplate": {
                         "spec": {
                             "hostNetwork": True,
                             "dnsPolicy": "ClusterFirstWithHostNet",
+                            "containers": [
+                                {
+                                    "name": "linstor-satellite",
+                                    "resources": {
+                                        "requests": {
+                                            "cpu": "100m",
+                                            "memory": "512Mi",
+                                        },
+                                        "limits": {"memory": "2560Mi"},
+                                    },
+                                },
+                            ],
                             "volumes": [
                                 {"name": "usr-src", "$patch": "delete"},
                             ],
@@ -650,6 +683,11 @@ vmsingle = k8s.helm.v3.Release(
         ),
         values={
             "server": {
+                # Was BestEffort; OOM-killed Oct 24. Sized to 60d p99.
+                "resources": {
+                    "requests": {"cpu": "100m", "memory": "768Mi"},
+                    "limits": {"memory": "1Gi"},
+                },
                 "retentionPeriod": "60d",
                 "extraArgs": {"promscrape.configCheckInterval": "1m"},
                 # Prefer node6 (diskful replica).
