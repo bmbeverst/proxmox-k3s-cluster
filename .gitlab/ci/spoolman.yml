@@ -1,0 +1,15 @@
+# Spoolman backup self-test.
+# Spoolman snapshot self-test; case 1 catches naive DB copies.
+check:spoolman-backup:
+  stage: test
+  image: python:3.13-slim
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "push"
+      changes:
+        - pulumi/my-apps/pod-scripts/spoolman-backup.py
+        - pulumi/my-apps/pod-scripts/test-spoolman-backup.py
+        - pulumi/my-apps/spoolman.py
+        - .gitlab/ci/spoolman.yml
+    - when: never
+  script:
+    - python3 pulumi/my-apps/pod-scripts/test-spoolman-backup.py

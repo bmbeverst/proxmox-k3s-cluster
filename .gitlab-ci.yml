@@ -17,13 +17,21 @@ include:
   - template: Security/SAST.gitlab-ci.yml
   - template: Security/Secret-Detection.gitlab-ci.yml
   - template: Security/Container-Scanning.gitlab-ci.yml
-  # Build + scan jobs live in containers.yml.
-  - local: .gitlab/ci/containers.yml
+  # One file per image: editing one does not trigger the others' builds.
+  - local: .gitlab/ci/vints-server.yml
+  - local: .gitlab/ci/vints-backup.yml
+  - local: .gitlab/ci/paseo.yml
+  - local: .gitlab/ci/spoolman.yml
 
 # Enable once per clone: make hooks (see README)
 
 variables:
   SECRET_DETECTION_ENABLED: "true"
+
+# Gated per image in the split CI files.
+container_scanning:
+  rules:
+    - when: never
 
 # Weekly only; the local pre-push hook guards pushes.
 lint:python:

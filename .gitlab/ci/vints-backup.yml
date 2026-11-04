@@ -1,0 +1,115 @@
+# Vints backup image: build, scan, smoke.
+build:vints-backup:
+  stage: build
+  image: quay.io/containers/buildah:v1.43.4-immutable
+  # Shared group: parallel vfs builds exhausted the runner's disk.
+  resource_group: image-builds
+  script:
+    - |
+      set -euo pipefail
+      # skopeo for registry auth; not in the buildah image.
+      dnf -y -q install skopeo jq
+      REPO="$CI_REGISTRY_IMAGE/vints-backup"
+      TAG=$(grep '^vints_backup_image_tag:' pulumi/versions.yaml | awk '{print $2}')
+      printf '%s' "$TAG" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' \
+        || { echo "FATAL: vints_backup_image_tag in pulumi/versions.yaml is not X.Y.Z"; exit 1; }
+      MAJOR="${TAG%%.*}"; REST="${TAG#*.}"; MINOR="${REST%%.*}"
+      TAGS=$(skopeo list-tags --retry-times 3 \
+        --creds "$CI_REGISTRY_USER:$CI_REGISTRY_PASSWORD" "docker://$REPO" | jq -r '.Tags[]') \
+        || { echo "FATAL: could not read vints-backup tags from the registry"; exit 1; }
+      MAX_PATCH=$(printf '%s\n' "$TAGS" | grep -E "^${MAJOR}\.${MINOR}\.[0-9]+$" \
+        | sed 's/^.*\.//' | sort -n | tail -1)
+      FULL_TAG="${MAJOR}.${MINOR}.$(( ${MAX_PATCH:-0} + 1 ))"
+
+      echo "Building $REPO:$FULL_TAG (track ${MAJOR}.${MINOR})"
+      # --layers so the pin/kubectl/script layers dedupe
+      buildah build --layers --storage-driver=vfs --isolation=chroot \
+        --tag "$REPO:$FULL_TAG" \
+        --tag "$REPO:latest" \
+        pulumi/my-apps/containers/backup
+      LATEST_TAGS=$(skopeo list-tags --retry-times 3 \
+        --creds "$CI_REGISTRY_USER:$CI_REGISTRY_PASSWORD" "docker://$REPO" | jq -r '.Tags[]') \
+        || { echo "FATAL: could not re-read vints-backup tags before pushing"; exit 1; }
+      if printf '%s\n' "$LATEST_TAGS" | grep -qx "$FULL_TAG"; then
+        echo "FATAL: vints-backup:$FULL_TAG was published while building; refusing to overwrite"; exit 1
+      fi
+      buildah push --storage-driver=vfs \
+        --creds "$CI_REGISTRY_USER:$CI_REGISTRY_PASSWORD" \
+        "$REPO:$FULL_TAG" \
+        "docker://$REPO:$FULL_TAG"
+      buildah push --storage-driver=vfs \
+        --creds "$CI_REGISTRY_USER:$CI_REGISTRY_PASSWORD" \
+        "$REPO:latest" \
+        "docker://$REPO:latest"
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "push"
+      changes:
+        - pulumi/my-apps/containers/backup/**
+        - .gitlab/ci/vints-backup.yml
+    - when: never
+
+
+container_scanning:vints-backup:
+  extends: container_scanning
+  stage: scan
+  variables:
+    CS_IMAGE: "$CI_REGISTRY_IMAGE/vints-backup:latest"
+    CS_DOCKERFILE_PATH: "pulumi/my-apps/containers/backup/Dockerfile"
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "push"
+      changes:
+        - pulumi/my-apps/containers/backup/**
+        - .gitlab/ci/vints-backup.yml
+    - when: never
+
+smoke:vints-backup:
+  stage: smoke
+  image: quay.io/containers/podman:v5.8.7-immutable
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "push"
+      changes:
+        - pulumi/my-apps/containers/backup/**
+        - .gitlab/ci/vints-backup.yml
+    - when: never
+  script:
+    - podman login -u "$CI_REGISTRY_USER" -p "$CI_REGISTRY_PASSWORD" "$CI_REGISTRY"
+    - |
+      TAG="latest"
+      set -e
+      D=$(mktemp -d)
+      mkdir -p "$D/data/Saves" "$D/data/Playerdata" "$D/dest" "$D/tmp"
+      printf 'world' > "$D/data/Saves/seed.vcdbs"
+      printf '{}' > "$D/data/serverconfig.json"
+
+      # Whitelist/bans/player data live beside the world, not inside it.
+      printf '["player"]' > "$D/data/Playerdata/playerswhitelisted.json"
+      # Per-mod settings live beside the world too.
+      mkdir -p "$D/data/ModConfig"
+      printf '{}' > "$D/data/ModConfig/primitivesurvival.json"
+
+      # Killed mid-tar runs leave .part behind; prune glob misses
+      printf 'stale' > "$D/dest/saves-20000101T000000Z.tar.gz.part"
+      podman run --rm -u 0 \
+        -e DATA_PATH=/data -e BACKUP_DEST=/backups \
+        -v "$D/data":/data -v "$D/dest":/backups -v "$D/tmp":/tmp \
+        "$CI_REGISTRY_IMAGE/vints-backup:$TAG" \
+        || { echo "backup smoke FAILED: non-zero exit"; exit 1; }
+      ls "$D/dest"/saves-*.tar.gz >/dev/null 2>&1 \
+        || { echo "backup smoke FAILED: no tar produced"; exit 1; }
+
+      # Members mirror DATA_PATH: world under Saves/, serverconfig.json beside it.
+      tar -tzf "$D/dest"/saves-*.tar.gz > "$D/members.txt"
+      grep -qx 'Saves/seed.vcdbs' "$D/members.txt" \
+        || { echo "backup smoke FAILED: world missing from tar"; cat "$D/members.txt"; exit 1; }
+      grep -qx 'serverconfig.json' "$D/members.txt" \
+        || { echo "backup smoke FAILED: serverconfig.json missing from tar"; cat "$D/members.txt"; exit 1; }
+      # Restore must include whitelist/bans (player lockout).
+      grep -qx 'Playerdata/playerswhitelisted.json' "$D/members.txt" \
+        || { echo "backup smoke FAILED: Playerdata missing from tar"; cat "$D/members.txt"; exit 1; }
+      grep -qx 'ModConfig/primitivesurvival.json' "$D/members.txt" \
+        || { echo "backup smoke FAILED: ModConfig missing from tar"; cat "$D/members.txt"; exit 1; }
+      # Stale .part files from killed runs must be swept.
+      [ ! -f "$D/dest/saves-20000101T000000Z.tar.gz.part" ] \
+        || { echo "backup smoke FAILED: stale .part not cleaned up"; ls -la "$D/dest"; exit 1; }
+      echo "backup smoke OK"
+
