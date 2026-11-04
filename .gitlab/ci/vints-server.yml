@@ -68,10 +68,15 @@ build:vints:
 
       echo "Building $REPO:$FULL_TAG (track ${MAJOR}.${MINOR}) with Stratum $STRATUM_VERSION over Vintage Story $VS_VERSION"
       # --layers dedupes unchanged base/apt/game layers
+      # Registry cache: the bake stage survives across runner runs.
+      buildah login -u "$CI_REGISTRY_USER" -p "$CI_REGISTRY_PASSWORD" "$CI_REGISTRY"
       buildah build --layers --storage-driver=vfs --isolation=chroot \
         --build-arg "VS_VERSION=$VS_VERSION" \
         --build-arg "STRATUM_VERSION=$STRATUM_VERSION" \
         --build-arg "STRATUM_SHA256=$STRATUM_SHA256" \
+        --cache-from "$CI_REGISTRY_IMAGE/vints-server/buildcache" \
+        --cache-to "$CI_REGISTRY_IMAGE/vints-server/buildcache" \
+        --build-arg "APT_REFRESH=$(date -u +%G-W%V)" \
         --tag "$REPO:$FULL_TAG" \
         --tag "$REPO:latest" \
         pulumi/my-apps/containers/server

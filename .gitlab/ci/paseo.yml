@@ -19,6 +19,7 @@ build:paseo:
         --format docker \
         --cache-from "$CI_REGISTRY_IMAGE/paseo/buildcache" \
         --cache-to "$CI_REGISTRY_IMAGE/paseo/buildcache" \
+        --build-arg "APT_REFRESH=$(date -u +%G-W%V)" \
         --tag "$REPO:$TAG" \
         pulumi/my-apps/containers/paseo
       buildah push --storage-driver=vfs \

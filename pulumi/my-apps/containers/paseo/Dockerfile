@@ -13,15 +13,32 @@ RUN set -eux; \
     npm_config_cache=/tmp/npmcache npm install -g --prefix /opt/cline "cline@${CLINE_VERSION}"; \
     rm -rf /tmp/npmcache
 
-# Pulumi CLI stage: tarball fetch; all pulumi/* binaries, old layout kept.
+# Pulumi CLI stage: tarball fetch, verified against upstream checksums.
 FROM ghcr.io/getpaseo/paseo:${PASEO_BASE_TAG} AS pulumi
 # renovate: datasource=github-releases depName=pulumi/pulumi
 ARG PULUMI_VERSION=3.261.0
 RUN set -eux; \
     [ "$(uname -m)" = x86_64 ] || { echo "FATAL: tarball is linux-x64 only"; exit 1; }; \
     mkdir -p /opt/bin; \
-    curl -fsSL "https://get.pulumi.com/releases/sdk/pulumi-v${PULUMI_VERSION}-linux-x64.tar.gz" \
-    | tar -xz -C /opt/bin --strip-components=1
+    curl -fsSL --retry 3 --retry-all-errors \
+      "https://get.pulumi.com/releases/sdk/pulumi-v${PULUMI_VERSION}-linux-x64.tar.gz" \
+      -o /tmp/pulumi.tar.gz; \
+    curl -fsSL --retry 3 --retry-all-errors \
+      "https://github.com/pulumi/pulumi/releases/download/v${PULUMI_VERSION}/pulumi-${PULUMI_VERSION}-checksums.txt" \
+      -o /tmp/checksums.txt; \
+    grep "pulumi-v${PULUMI_VERSION}-linux-x64.tar.gz" /tmp/checksums.txt \
+      | sed "s|pulumi-v${PULUMI_VERSION}-linux-x64.tar.gz|pulumi.tar.gz|" \
+      | (cd /tmp && sha256sum -c -); \
+    tar -xzf /tmp/pulumi.tar.gz -C /opt/bin --strip-components=1; \
+    rm -f /tmp/pulumi.tar.gz /tmp/checksums.txt
+
+# Panel deps: own stage, so tool bumps never re-run npm ci.
+FROM ghcr.io/getpaseo/paseo:${PASEO_BASE_TAG} AS panel
+WORKDIR /opt/paseo-ops-panel
+COPY plugins/paseo-ops-panel/package.json plugins/paseo-ops-panel/package-lock.json ./
+RUN set -eux; \
+    npm_config_cache=/tmp/npmcache npm ci --no-audit --no-fund; \
+    rm -rf /tmp/npmcache
 
 # Upstream uv image: binaries only, nothing to build.
 FROM ghcr.io/astral-sh/uv:${UV_VERSION} AS uv
@@ -29,34 +46,28 @@ FROM ghcr.io/astral-sh/uv:${UV_VERSION} AS uv
 FROM ghcr.io/getpaseo/paseo:${PASEO_BASE_TAG} AS final
 USER root
 ENV PULUMI_SKIP_UPDATE_CHECK=true
+# APT_REFRESH is stamped weekly by CI: max ~7 days of apt security lag.
+ARG APT_REFRESH
 RUN set -eux; \
     apt-get update; \
+    apt-get upgrade -y; \
     apt-get install -y --no-install-recommends python3 jq ca-certificates unzip tar; \
     rm -rf /var/lib/apt/lists/*
-# Big, stable COPY first; a cline bump re-commits only its small layer.
+# Ordered stable -> volatile; each COPY is a re-commit, not a rebuild.
 COPY --from=pulumi /opt/bin/ /usr/local/bin/
 COPY --from=uv /uv /uvx /usr/local/bin/
+COPY --from=panel --chown=paseo:paseo /opt/paseo-ops-panel /opt/paseo-ops-panel
 COPY --from=cline /opt/cline /opt/cline
 RUN set -eux; \
     ln -s /opt/cline/bin/cline /usr/local/bin/cline; \
     test -x /usr/local/bin/cline; \
     python3 --version; jq --version; pulumi version; uv --version
 
-# npm ci only re-runs when the manifests change; sources copy over it.
-COPY --chown=paseo:paseo plugins/paseo-ops-panel/package.json \
-     plugins/paseo-ops-panel/package-lock.json /opt/paseo-ops-panel/
-USER paseo
-RUN set -eux; cd /opt/paseo-ops-panel; \
-    npm_config_cache=/tmp/npmcache npm ci --no-audit --no-fund; \
-    rm -rf /tmp/npmcache
-USER root
+# Guard script ships 0755 in git; panel sources land paseo-owned.
 COPY --chown=paseo:paseo plugins/ /opt/
-RUN set -eux; \
-    chmod +x /opt/dangerous-command-guard/cline-approve-dangerous; \
-    ln -sf /opt/dangerous-command-guard/cline-approve-dangerous /usr/local/bin/cline-approve-dangerous
+RUN ln -sf /opt/dangerous-command-guard/cline-approve-dangerous /usr/local/bin/cline-approve-dangerous
 
 COPY entrypoint.sh /usr/local/bin/paseo-ops-entrypoint
-RUN chmod +x /usr/local/bin/paseo-ops-entrypoint
 
 ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/paseo-ops-entrypoint"]
 CMD ["node"]
