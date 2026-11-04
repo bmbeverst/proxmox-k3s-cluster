@@ -1,23 +1,5 @@
 #!/usr/bin/env bash
-# Resolves the vints mod pins into $DATA_PATH/Mods from a content-addressed depot on the data PVC, so
-# a steady-state boot (same pins, same game minor) needs no network at all.
-#
-#   --check   --mods <pins>                    CI: scratch data path; resolve, verify and stage the set
-#   --promote --mods <pins>                    CI: rewrite promotable URL pins in place (idempotent)
-#   --stage   --mods <pins> [--data-path <p>] [--seed <dir>]
-#                                              init container: merge the seeded depot bundle, fetch
-#                                              what is still missing, then make <p>/Mods exactly the
-#                                              pinned set
-#
-# Pins file: one "<key>: <version|url>" per line, "#" starts a comment.
-#   key    a version pin's key is the mod's internal Mod ID (the game keys on the modid, not on the
-#          filename) and is Renovate's depName; a URL pin's key is free-form and --promote replaces
-#          it with the internal Mod ID. -> $DATA_PATH/Mods/<key>.zip
-#   value  a released mod version, or a full https .zip URL used verbatim.
-# $VS_VERSION fixes the game minor: the image bakes it, CI exports it from the same pin.
-#
-# Everything that cannot be resolved to verified bytes is fatal: the server must never start on a
-# missing or partial mod set. The depot and catalog live outside Mods/, so the game only sees zips.
+# Resolves mod pins into $DATA_PATH/Mods from a PVC depot.
 set -euo pipefail
 
 API="https://mods.vintagestory.at/api/mod"
@@ -61,12 +43,10 @@ done
 MINOR="${BASH_REMATCH[1]}"
 MINOR_RE="^${MINOR//./\\.}\\.[0-9]+$"
 
-# --- layout ------------------------------------------------------------------
-# --check and --promote work in a throwaway data path, so all three modes resolve the pins the exact
-# way --stage does.
+# --- layout: --check/--promote use a throwaway data path.
 if [[ "$MODE" == "--stage" ]]; then
   DATA_PATH="${DATA_PATH_ARG:-${DATA_PATH:-/data}}"
-  # The init container's rootfs is read-only and has no /tmp: scratch lives on the data PVC.
+  # Rootfs read-only, no /tmp: scratch lives on data PVC.
   trap 'rm -rf "$WORK"' EXIT
 else
   DATA_PATH="$(mktemp -d)"
@@ -79,11 +59,7 @@ CATALOG="$META/catalog.json"
 mkdir -p "$DATA_PATH/Mods" "$DEPOT" "$WORK"
 [[ -f "$CATALOG" ]] || echo '{}' > "$CATALOG"
 
-# --- depot + catalog ---------------------------------------------------------
-# catalog.json maps "<key>:<version>:<minor>", "url:<url>:<minor>" and "fileid:<fileid>:<minor>" to
-# the sha256 of the archive. The fileid entry is what lets a promoted URL pin reuse the depot bytes,
-# and a pre-flatten {fileid, filename, sha256} value is still honored so an existing depot is never
-# re-downloaded just because the catalog changed shape.
+# --- catalog maps key/url/fileid keys to archive sha256.
 
 # The sha256 the catalog records for <key>, or "".
 catalog_sha() {
@@ -95,27 +71,23 @@ catalog_put() {  # <key> <sha256>
   mv "$WORK/catalog.new" "$CATALOG"
 }
 
-# Forgets <sha>'s depot file: the next attempt re-downloads and overwrites the stale catalog entry.
+# Drops <sha>'s depot file; next attempt re-downloads.
 catalog_drop_sha() { rm -f "$DEPOT/$1.zip"; }
 
-# 0 when the depot holds <sha> and the bytes still hash to it.
+# 0 when depot/<sha>.zip exists and hashes to <sha>.
 depot_has() {
   [[ -f "$DEPOT/$1.zip" ]] || return 1
   [[ "$(sha256sum "$DEPOT/$1.zip" | cut -d' ' -f1)" == "$1" ]]
 }
 
-# The Mod DB file id in a https://mods.vintagestory.at/download/<fileid>[/<filename>] URL, else "".
+# Mod DB fileid in a download URL, else "".
 url_fileid() {
   if [[ "$1" =~ ^https://mods\.vintagestory\.at/download/([0-9]+)([/?].*)?$ ]]; then
     printf '%s' "${BASH_REMATCH[1]}"
   fi
 }
 
-# --- seed (bundle image) ------------------------------------------------------
-# The CI-baked bundle image carries the same verified depot the resolver would otherwise download. The
-# seed init container stages it at --seed, and seed_depot merges it in before anything is resolved (the
-# catalog decides cache hits), so a pin bump lands without a single Mod DB fetch. A dir that is not
-# there is a no-op, so a pod without the bundle behaves exactly as it did without --seed.
+# --- seed: merges the CI-baked depot bundle before resolving.
 
 seed_depot() {  # <seed dir>
   local dir="$1" src name n=0 entries bundle
@@ -124,8 +96,7 @@ seed_depot() {  # <seed dir>
     || fail "seed '$dir' carries no catalog.json (CI only publishes a complete bundle)"
   jq -e 'type == "object"' "$dir/catalog.json" > /dev/null \
     || fail "seed '$dir/catalog.json' is not a JSON object"
-  # Names are content-addressed, so a name that is already in the depot is the right file unless its
-  # bytes no longer hash to it: the bundle then repairs the cache before fetch_artifact sees it.
+  # Content-addressed names: repair depot files whose bytes drifted.
   for src in "$dir"/depot/*.zip; do
     [[ -e "$src" ]] || continue
     name="${src##*/}"
@@ -136,8 +107,7 @@ seed_depot() {  # <seed dir>
     fi
     cp "$src" "$DEPOT/$name"
   done
-  # The seed wins the keys it carries; every key the PVC already had stays (an older version stays
-  # usable for a rollback).
+  # Seed keys win; PVC keys stay for rollback.
   entries="$(jq 'length' "$dir/catalog.json")"
   jq -s '.[0] * .[1]' "$CATALOG" "$dir/catalog.json" > "$WORK/catalog.new" \
     || fail "seed '$dir/catalog.json' cannot be merged into $CATALOG"
@@ -147,17 +117,16 @@ seed_depot() {  # <seed dir>
 }
 
 # --- pins --------------------------------------------------------------------
-# parse_pins fills the PIN_* arrays; the same index is the same pin line.
+# parse_pins fills the PIN_* arrays, index-aligned.
 
-# The first duplicated input line, or "". awk, not head: head closing early SIGPIPEs the pipeline.
+# First duplicated line, or "". awk avoids SIGPIPE.
 first_dup() { sort | uniq -d | awk 'NR == 1 { d = $0 } END { print d }'; }
 
-# Reads the real pin lines into PIN_*; comments and blank lines are skipped.
+# Fills PIN_*; skips comments and blank lines.
 parse_pins() {
   local lineno rest key value kind dup
   PIN_LINENO=() PIN_KEY=() PIN_KIND=() PIN_VALUE=()
-  # One awk pass drops CRs, a trailing comment and the surrounding blanks, and numbers the lines so
-  # a failure can name the line to edit.
+  # awk drops CRs/comments, numbers lines for error messages.
   while IFS=$'\t' read -r lineno rest; do
     [[ "$rest" =~ ^([A-Za-z0-9_.-]+):[[:space:]]*(.*)$ ]] \
       || fail "$PINS:$lineno: not a '<key>: <version|url>' line: '$rest'"
@@ -175,12 +144,7 @@ parse_pins() {
   dup="$(printf '%s\n' "${PIN_KEY[@]}" | first_dup)"
   [[ -z "$dup" ]] || fail "$PINS: key '$dup' is pinned twice"
 }
-# --- Mod DB ------------------------------------------------------------------
-# Body of GET /api/mod/<query>, or non-zero when the mod is not on the Mod DB. A bad urlalias
-# answers 200 with a {"statuscode":"404"} body, so require .mod.modid instead of trusting the status.
-# Pipes, never here-strings: bash spills a here-string bigger than its pipe buffer to a temp file, and
-# the init container's rootfs is read-only (a 97 KB API body used to fail with "cannot create temp
-# file for here-document").
+# --- Mod DB: GET /api/mod; pipes, never here-strings.
 api_mod() {
   local query="$1" json
   json="$(curl -fsSL --retry 3 "$API/$query")" || return 1
@@ -188,7 +152,7 @@ api_mod() {
   printf '%s' "$json"
 }
 
-# Fatal resolution of a version pin: sets API_FILEID / API_MODIDSTR.
+# Resolves a version pin; sets API_FILEID / API_MODIDSTR.
 api_version_release() {
   local ctx="$1" key="$2" pin="$3" json rel
   json="$(api_mod "$key")" \
@@ -209,12 +173,7 @@ api_version_release() {
     || fail "$ctx: release '$pin' carries internal Mod ID '$API_MODIDSTR', expected '$key'"
 }
 
-# --- artifacts ---------------------------------------------------------------
-# jq is strict JSON; VS's own parser (Newtonsoft) tolerates a trailing comma before } or ], and a mod
-# the game happily loads must not be unstaginable. Only a comma outside a string, followed by nothing
-# but whitespace and a closing brace/bracket, is dropped; anything else still fails the reads below.
-# POSIX awk only (the image's awk is Debian's, not gawk), so the file is slurped with getline rather
-# than RS="" paragraph mode, and /dev/null keeps awk from reading stdin.
+# --- artifacts: strip VS-tolerated trailing commas (POSIX awk).
 strip_trailing_commas() {  # <file> -> stdout
   awk -v file="$1" '
   BEGIN {
@@ -240,16 +199,14 @@ strip_trailing_commas() {  # <file> -> stdout
   }' /dev/null
 }
 
-# Reads the zip's modinfo.json into MODINFO_MODID / MODINFO_VERSION and asserts what every artifact
-# must satisfy: a plain modid, and, if it declares one, a game dependency the image can satisfy.
+# Reads modinfo.json; asserts a modid and satisfiable game dep.
 read_modinfo() {
   local ctx="$1" zip="$2" dep newest
   if ! unzip -p "$zip" modinfo.json > "$WORK/modinfo.json" 2>/dev/null || [[ ! -s "$WORK/modinfo.json" ]]; then
     rm -f "$WORK/modinfo.json"
     fail "$ctx: no readable modinfo.json at the zip root"
   fi
-  # One sanitize for every read below, so a tolerated trailing comma cannot hide a real parse error and
-  # an unparseable file still fails loudly instead of aborting the script with jq's own exit code.
+  # Validate once; unparseable files fail loudly below.
   if ! jq -e . "$WORK/modinfo.json" > /dev/null 2>&1; then
     strip_trailing_commas "$WORK/modinfo.json" > "$WORK/modinfo.json.fixed"
     mv "$WORK/modinfo.json.fixed" "$WORK/modinfo.json"
@@ -261,8 +218,7 @@ read_modinfo() {
   [[ -n "$MODINFO_MODID" ]] || fail "$ctx: modinfo.json is not readable JSON or carries no modid"
   [[ "$MODINFO_MODID" =~ ^[A-Za-z0-9_.-]+$ ]] \
     || fail "$ctx: modinfo.json modid '$MODINFO_MODID' is not a plain id"
-  # dependencies.game is a SemVer minimum, except "*" (any version), which sort -V ranks above every
-  # real version.
+  # dependencies.game is a SemVer minimum ("*" sorts above all).
   if [[ -n "$dep" && "$dep" != "*" ]]; then
     newest="$(printf '%s\n%s\n' "$dep" "$VS_VERSION" | sort -V | tail -1)"
     [[ "$newest" == "$VS_VERSION" ]] || fail "$ctx: needs game >= $dep, the image runs $VS_VERSION"
@@ -278,14 +234,13 @@ use_cached() {  # <ctx> <sha256>
   ART_SOURCE="depot"
 }
 
-# Makes sure the pinned artifact is in the depot, downloading it only when it is not there.
-# Sets ART_SHA / ART_MODID / ART_VERSION / ART_SOURCE.
+# Ensures the artifact is in the depot; sets ART_*.
 fetch_artifact() {  # <ctx> <kind> <key> <version|url>
   local ctx="$1" kind="$2" key="$3" value="$4"
   local catkey fileid url cached sha tmpfile
   if [[ "$kind" == version ]]; then catkey="$key:$value:$MINOR"; else catkey="url:$value:$MINOR"; fi
 
-  # 1) already verified and cached: no API call, no download
+  # 1) cached and verified: no API, no download.
   cached="$(catalog_sha "$catkey")"
   if [[ -n "$cached" ]]; then
     if depot_has "$cached"; then
@@ -296,12 +251,12 @@ fetch_artifact() {  # <ctx> <kind> <key> <version|url>
     catalog_drop_sha "$cached"
   fi
 
-  # 2) the artifact's URL (a version pin needs the Mod DB for its fileid)
+  # 2) the artifact URL; version pins fetch the fileid.
   if [[ "$kind" == version ]]; then
     api_version_release "$ctx" "$key" "$value"
     fileid="$API_FILEID"
     url="$DOWNLOAD/$fileid"
-    # 3) the same bytes are often in the depot already (a URL pin promoted to this fileid)
+    # 3) promoted URL pins often share these depot bytes.
     cached="$(catalog_sha "fileid:$fileid:$MINOR")"
     if [[ -n "$cached" ]] && depot_has "$cached"; then
       use_cached "$ctx" "$cached"
@@ -329,9 +284,7 @@ fetch_artifact() {  # <ctx> <kind> <key> <version|url>
     catalog_put "fileid:$fileid:$MINOR" "$sha"
   fi
 }
-# --- the pinned set ----------------------------------------------------------
-# Phase 1: resolve every pin into the RES_* arrays; the same index is the same pin line. Anything
-# that cannot be resolved to verified bytes fails before Mods/ is touched, so there is no partial set.
+# --- pinned set: resolve all pins before touching Mods/.
 resolve_all() {
   local i ctx dup dup_keys=""
   RES_KEY=() RES_MODID=() RES_VERSION=() RES_SHA=()
@@ -360,9 +313,7 @@ resolve_all() {
   log "resolved every pin against Vintage Story $VS_VERSION (minor $MINOR)"
 }
 
-# --- stage (init container) --------------------------------------------------
-# Every MODS_KEEP entry is a pinned <key>.zip, so anything else in Mods/ is a leftover: the
-# deliberate, logged removal path.
+# --- stage: prune Mods/ entries outside the pinned set.
 declare -A MODS_KEEP=()
 
 prune_mods() {
@@ -381,7 +332,7 @@ prune_mods() {
   done
 }
 
-# Phase 2: make Mods/ exactly the resolved set. Pure local I/O: phase 1 verified every sha256.
+# Phase 2: make Mods/ the resolved set (local I/O).
 stage_apply() {
   local i
   for i in "${!RES_KEY[@]}"; do
@@ -393,9 +344,7 @@ stage_apply() {
   log "depot $DEPOT: $(du -sh "$DEPOT" | cut -f1), $(ls -1 "$DEPOT" | wc -l) archive(s)"
 }
 
-# --- promote (URL pin -> tracked pin) ----------------------------------------
-# A URL pin becomes "<internal modid>: <version>" only when that tracked pin would resolve to exactly
-# the bytes the URL serves; every other URL pin stays one, with the reason logged.
+# --- promote: track URL pins byte-for-byte when possible.
 
 untrack() { log "untracked: $1: $2; it stays a URL pin"; }  # <ctx> <reason>
 
@@ -438,7 +387,7 @@ promote_entry() {  # <index into the PIN_* arrays>
     untrack "$ctx" "'$ART_VERSION' is older than $newest for $MINOR, so it stays a URL pin on purpose"
     return 0
   fi
-  # Rewriting into a key another line already pins would write a pins file the resolver rejects.
+  # Refuse keys another line already pins.
   for i in "${!PIN_KEY[@]}"; do
     if [[ "$i" != "$idx" && "${PIN_KEY[$i]}" == "$ART_MODID" ]]; then other="1"; fi
   done
@@ -461,7 +410,7 @@ promote_all() {
     log "nothing to promote: no URL pin can be tracked byte-for-byte"
     return 0
   fi
-  # Rewrites are keyed by line number, so comments, blanks and untouched pins survive verbatim.
+  # Rewrites keyed by line number; other lines survive.
   while IFS= read -r line || [[ -n "$line" ]]; do
     n=$((n + 1))
     if [[ -n "${REWRITE[$n]:-}" ]]; then

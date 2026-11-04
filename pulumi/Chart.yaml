@@ -1,4 +1,4 @@
-# Helm v3 Chart.yaml so Renovate's built-in helmv3 manager bumps them natively.
+# Renovate helmv3 bumps these chart versions natively.
 apiVersion: v2
 name: infra-base
 version: 0.1.0

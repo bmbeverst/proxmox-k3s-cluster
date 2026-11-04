@@ -1,9 +1,6 @@
-# Container build + scan jobs for the custom container images.
-# Included from the root .gitlab-ci.yml (`- local: .gitlab/ci/containers.yml`).
+# Custom container build + scan jobs, included from .gitlab-ci.yml
 
-# Mod pins: resolve every pin against the Mod DB (bytes, modid, version, game dependency) and check
-# that renovate.json tracks the game minor the image bakes. Runs the resolver straight out of the
-# repo, so a pin or resolver change needs no image tag hop.
+# Resolve mod pins from repo; no image tag hop.
 check:vints-mods:
   stage: test
   image: quay.io/containers/podman:v5.8.7-immutable
@@ -17,7 +14,7 @@ check:vints-mods:
         - .gitlab/ci/containers.yml
     - when: never
   script:
-    # curl and unzip already ship in this image; only jq is missing.
+    # Image ships curl+unzip; only jq missing.
     - dnf -y -q install jq
     - |
       set -euo pipefail
@@ -26,9 +23,7 @@ check:vints-mods:
       export VS_VERSION
       MINOR="${VS_VERSION%.*}"                   # 1.22.7 -> 1.22
       DS_NAME="vintagestory_mod_${MINOR//./_}"   # -> vintagestory_mod_1_22
-      # Drift guard: the mods manager must point at this game minor's datasource, otherwise Renovate
-      # would quietly track a game version the image does not run. A VS bump fails here until
-      # renovate.json follows (two lines: the manager's datasourceTemplate + a customDatasources key).
+      # Drift guard: manager must track the image's game minor.
       jq -e --arg ds "custom.$DS_NAME" --arg key "$DS_NAME" '
         ([.customManagers[] | select((.description // "") | test("vints mods"))] | length == 1)
         and ([.customManagers[] | select((.description // "") | test("vints mods"))][0].datasourceTemplate == $ds)
@@ -36,9 +31,7 @@ check:vints-mods:
       ' renovate.json > /dev/null
       pulumi/my-apps/containers/server/entrypoints/resolve-vints-mods.sh \
         --check --mods pulumi/my-apps/containers/server/vintagestory-mods.yaml
-# Spoolman snapshot script self-test. Script ships as a ConfigMap, so no build --
-# only behaviour. Case 1 is the point: a live WAL DB must snapshot the newest
-# commits, which a naive copy of spoolman.db does not while looking valid.
+# Spoolman snapshot self-test; case 1 catches naive DB copies.
 check:spoolman-backup:
   stage: test
   image: python:3.13-slim
@@ -56,7 +49,7 @@ check:spoolman-backup:
 build:vints:
   stage: build
   image: quay.io/containers/buildah:v1.43.4-immutable
-  # "max patch + 1" is read-then-write: serialise so two pipelines can't compute the same tag.
+  # "max patch + 1" serialises tag computation.
   resource_group: build-vints-server
   script:
     - |
@@ -83,15 +76,13 @@ build:vints:
       STRATUM_SHA256=$(sed -n 's/^stratum_sha256:[[:space:]]*//p' "$VERS")
       [ -n "$STRATUM_VERSION" ] && [ -n "$STRATUM_SHA256" ] \
         || { echo "FATAL: stratum_version/stratum_sha256 missing from $VERS"; exit 1; }
-      # Stratum's launcher resolves the vanilla archive itself, so only assert the pinned game version
-      # exists upstream: a bad pin should fail here, not after the install download inside the build.
+      # Assert pinned game version exists upstream before install
       VS_INDEX="https://api.vintagestory.at/stable-unstable.json"
       curl -fsSL --retry 3 "$VS_INDEX" | jq -e --arg v "$VS_VERSION" '.[$v]' > /dev/null \
         || { echo "FATAL: Vintage Story $VS_VERSION is not in $VS_INDEX"; exit 1; }
 
       echo "Building $REPO:$FULL_TAG (track ${MAJOR}.${MINOR}) with Stratum $STRATUM_VERSION over Vintage Story $VS_VERSION"
-      # --layers keeps base/apt/game separate so the registry dedupes everything unchanged instead of
-      # storing a fresh squashed blob per tag (see the Dockerfile's mtime pinning).
+      # --layers dedupes unchanged base/apt/game layers
       buildah build --layers --storage-driver=vfs --isolation=chroot \
         --build-arg "VS_VERSION=$VS_VERSION" \
         --build-arg "STRATUM_VERSION=$STRATUM_VERSION" \
@@ -117,9 +108,7 @@ build:vints:
   rules:
     - if: $CI_PIPELINE_SOURCE == "push"
       changes:
-        # Deliberately narrow: the mod pins also live under containers/server/, and a pins-only
-        # commit must not rebuild + republish the game image. Add any future build-context file
-        # that the image needs to this list.
+        # Pins-only commits must not rebuild the game image.
         - pulumi/my-apps/containers/server/Dockerfile
         - pulumi/my-apps/containers/server/entrypoints/**
         - pulumi/my-apps/containers/server/vintagestory-version.yaml
@@ -133,7 +122,7 @@ build:vints-backup:
   script:
     - |
       set -euo pipefail
-      # skopeo handles registry auth and pagination; the buildah image doesn't ship it.
+      # skopeo for registry auth; not in the buildah image.
       dnf -y -q install skopeo jq
       REPO="$CI_REGISTRY_IMAGE/vints-backup"
       TAG=$(grep '^vints_backup_image_tag:' pulumi/versions.yaml | awk '{print $2}')
@@ -148,7 +137,7 @@ build:vints-backup:
       FULL_TAG="${MAJOR}.${MINOR}.$(( ${MAX_PATCH:-0} + 1 ))"
 
       echo "Building $REPO:$FULL_TAG (track ${MAJOR}.${MINOR})"
-      # --layers so the pin/kubectl/script layers dedupe in the registry instead of one squashed blob per tag.
+      # --layers so the pin/kubectl/script layers dedupe
       buildah build --layers --storage-driver=vfs --isolation=chroot \
         --tag "$REPO:$FULL_TAG" \
         --tag "$REPO:latest" \
@@ -186,7 +175,7 @@ build:paseo:
       printf '%s' "$TAG" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' \
         || { echo "FATAL: paseo_image_tag in pulumi/versions.yaml is not X.Y.Z"; exit 1; }
       echo "Building $REPO:$TAG"
-      # --layers dedupes layers in the registry; --format docker keeps the HEALTHCHECK.
+      # --layers dedupes; --format docker keeps HEALTHCHECK
       buildah build --layers --storage-driver=vfs --isolation=chroot \
         --format docker \
         --tag "$REPO:$TAG" \
@@ -202,9 +191,7 @@ build:paseo:
         - .gitlab/ci/containers.yml
     - when: never
 
-# The mod bundle image: CI resolves + verifies every pin once and publishes the resulting depot, so
-# the pod seeds its PVC depot from the registry instead of the Mod DB. `:latest` is pushed from the
-# default branch only, so a feature branch can never clobber what the cluster pulls.
+# Publishes the depot image; pods seed from registry.
 bake:vints-mods:
   stage: build
   image: quay.io/containers/podman:v5.8.7-immutable
@@ -219,7 +206,7 @@ bake:vints-mods:
         - .gitlab/ci/containers.yml
     - when: never
   script:
-    # curl and unzip already ship in this image; only jq is missing.
+    # Image ships curl+unzip; only jq missing.
     - dnf -y -q install jq
     - |
       set -euo pipefail
@@ -276,16 +263,14 @@ bake:vints-mods:
         --arg c "$CI_COMMIT_SHA" \
         '{vs_version: $v, pins_sha256: $p, commit: $c}' > .ci-bundle/bundle.json
 
-      # A published bundle is always complete: one archive per pin, asserted before the push.
+      # Bundle must be complete: one archive per pin.
       ARCHIVES=$(ls .ci-bundle/depot/*.zip | wc -l)
       [ "$ARCHIVES" = "$PIN_COUNT" ] \
         || { echo "FATAL: the bundle holds $ARCHIVES archive(s) for $PIN_COUNT pin(s)"; exit 1; }
 
       podman build -f pulumi/my-apps/containers/mods/Dockerfile -t "$IMG" .
 
-      # The bundle is only worth publishing if it seeds: stage the image's own /bundle into a scratch
-      # data path and require the pins to install from it without a single fetch. Every branch runs
-      # this, so a broken seed fails the MR pipeline and not the post-merge one.
+      # Bundle must seed offline; every branch runs this check.
       D=$(mktemp -d)
       mkdir -p "$D/seed"
       CTR=$(podman create "$IMG")
@@ -346,7 +331,7 @@ container_scanning:vints-backup:
     - when: never
 
 
-# Smoke tests: boot each built image and assert it actually starts.
+# Smoke tests: boot each image, assert it starts.
 smoke:vints:
   stage: smoke
   image: quay.io/containers/podman:v5.8.7-immutable
@@ -374,7 +359,7 @@ smoke:vints:
       PINS_COUNT=$(grep -c '^[^#[:space:]]' "$D/config/mods.yaml" || true)
       echo "VS_VERSION=$VS_VERSION STRATUM=$STRATUM_VERSION TAG=$TAG PINS=$PINS_COUNT"
 
-      # 1) the tag promises this game version, served by this Stratum release
+      # 1) tag promises this game version and Stratum release
       baked=$(podman run --rm "$IMG" /serverfiles/StratumServer --stratum-version 2>/dev/null \
         | sed -n 's/^Base game: Vintage Story //p' | tr -d '[:space:]' || true)
       [ "$baked" = "$VS_VERSION" ] \
@@ -384,9 +369,7 @@ smoke:vints:
         || die "image labels Stratum '$label', pinned '$STRATUM_VERSION'"
       echo "baked game version OK: $baked (Stratum $STRATUM_VERSION)"
 
-      # 1b) the marker an image only earns by pinning its layer mtimes; without that pinning every rebuild
-      # re-uploads the game layer, which is what bloated the registry. Skipped for pre-fix images on purpose:
-      # a branch pull of :latest is always the last published image, not this branch's build.
+      # 1b) mtime-pinning keeps rebuilds from re-uploading the game layer
       if [ "$(podman image inspect --format '{{index .Config.Labels "com.proxmox-k3s.layer-mtimes"}}' \
         "$IMG")" = "pinned" ]; then
         drift=$(podman run --rm "$IMG" find /serverfiles -newermt @1 -print -quit 2>/dev/null || true)
@@ -395,13 +378,11 @@ smoke:vints:
         echo "layer mtimes pinned OK"
       fi
 
-      # 2) leftovers of the old installer: a stray zip and a legacy .url stamp must be pruned
+      # 2) prune old-installer leftovers: stray zip, legacy .url
       printf 'junk' > "$D/data/Mods/junk.zip"
       printf 'https://example.invalid/x.zip' > "$D/data/Mods/junk.url"
 
-      # 3) networked stage: every pin lands in Mods/ and in the depot. Runs on a read-only rootfs with
-      # no writable /tmp, which is exactly the init container: a here-string bigger than bash's pipe
-      # buffer spills to a temp file there, so this step is what keeps the API path temp-file free.
+      # 3) read-only rootfs, no writable /tmp; temp-file-free API path
       podman run --rm --read-only --read-only-tmpfs=false -u 0 -e DATA_PATH=/data \
         -v "$D/data":/data -v "$D/config":/config \
         "$IMG" /entrypoints/resolve-vints-mods.sh --stage --mods /config/mods.yaml \
@@ -419,7 +400,7 @@ smoke:vints:
       fi
       echo "stage OK: $PINS_COUNT pinned mod(s) + depot"
 
-      # 4) hermetic stage: the steady state must need no network at all
+      # 4) hermetic stage: steady state needs no network
       podman run --rm --network=none -u 0 -e DATA_PATH=/data \
         -v "$D/data":/data -v "$D/config":/config \
         "$IMG" /entrypoints/resolve-vints-mods.sh --stage --mods /config/mods.yaml \
@@ -430,7 +411,7 @@ smoke:vints:
       fi
       echo "offline stage OK"
 
-      # 5) a URL pin that 404s is fatal, in a fresh data dir, before the server is ever reached
+      # 5) 404 URL pin must fail before server boot
       printf 'anymod: https://mods.vintagestory.at/download/1/no-such-mod.zip\n' > "$D/config/bad.yaml"
       if podman run --rm -u 0 -e DATA_PATH=/data \
         -v "$D/empty":/data -v "$D/config":/config \
@@ -442,14 +423,14 @@ smoke:vints:
       [ -z "$(ls "$D/empty/Mods"/*.zip 2>/dev/null)" ] || die "a failed stage left zips in Mods/"
       echo "fail-loud stage OK"
 
-      # 6) generate config, then shrink the world so first boot reaches WorldReady fast
+      # 6) genconfig, then shrink world for fast first boot
       podman run --rm -u 0 -e DATA_PATH=/data -e PORT=42420 \
         -v "$D/data":/data \
         "$IMG" /bin/sh -c 'cd /serverfiles && ./StratumServer --stratum-skip-bootstrap --dataPath /data --genconfig >/dev/null 2>&1' \
         || die "genconfig step failed"
       sed -i 's/"MapSizeX": [0-9][0-9]*/"MapSizeX": 512/; s/"MapSizeY": [0-9][0-9]*/"MapSizeY": 128/; s/"MapSizeZ": [0-9][0-9]*/"MapSizeZ": 512/' "$D/data/serverconfig.json"
 
-      # 7) boot on the staged set: every pinned mod must load and the world must come up
+      # 7) boot staged set; all pinned mods must load
       podman run -d --name smoke-vints -u 0 \
         -e DATA_PATH=/data -e PORT=42420 \
         -v "$D/data":/data \
@@ -467,16 +448,15 @@ smoke:vints:
         tail -80 "$D/boot.log"
         die "server did not reach WorldReady"
       fi
-      # every staged zip + the 3 base mods baked into the game
+      # staged zips + 3 base mods baked into the game
       if ! grep -q "Found $((PINS_COUNT + 3)) mods (0 disabled)" "$D/boot.log"; then
         grep -i 'mods' "$D/boot.log" | head -5
         die "the game did not load $((PINS_COUNT + 3)) mods"
       fi
-      # the boot must be Stratum's, not a silent fallback to the vanilla launcher
+      # Boot must be Stratum's, not a vanilla fallback
       grep -q "Stratum ${STRATUM_VERSION#v} for Vintage Story $VS_VERSION" "$D/boot.log" \
         || { grep -i 'stratum' "$D/boot.log" | head -5; die "server did not boot as Stratum $STRATUM_VERSION"; }
-      # a version pin's key is the mod's internal Mod ID, which the game logs in its load order
-      # ("Mods, sorted by dependency: ..."); a URL pin's key is free-form, the count covers it
+      # Pin key = internal Mod ID from load-order log
       while read -r key; do
         if ! grep -qE "\b$key\b" "$D/boot.log"; then
           grep -i 'sorted by dependency' "$D/boot.log" | head -2
@@ -490,11 +470,7 @@ smoke:vints:
       grep -q '"ServerAutoSave": 900' "$D/data/servermagicnumbers.json" \
         || { echo "--- servermagicnumbers.json ---"; cat "$D/data/servermagicnumbers.json"; die "ServerAutoSave not raised"; }
 
-      # 8) regression: the console must be usable without a tty. A command written to the
-      # FIFO the entrypoint holds open has to be read and handled (a tty client that
-      # disconnects used to EOF stdin and mute the console for the rest of the pod's life).
-      # The server only starts reading its console once the game is running, so wait for
-      # RunGame first instead of racing WorldReady.
+      # 8) console FIFO without a tty; wait for RunGame
       ok=""
       for i in $(seq 1 30); do
         podman logs smoke-vints > "$D/boot.log" 2>&1 || true
@@ -544,7 +520,7 @@ smoke:vints-backup:
       mkdir -p "$D/data/ModConfig"
       printf '{}' > "$D/data/ModConfig/primitivesurvival.json"
 
-      # A run killed mid-tar leaves its .part behind; the prune glob never matches it.
+      # Killed mid-tar runs leave .part behind; prune glob misses
       printf 'stale' > "$D/dest/saves-20000101T000000Z.tar.gz.part"
       podman run --rm -u 0 \
         -e DATA_PATH=/data -e BACKUP_DEST=/backups \
@@ -560,24 +536,21 @@ smoke:vints-backup:
         || { echo "backup smoke FAILED: world missing from tar"; cat "$D/members.txt"; exit 1; }
       grep -qx 'serverconfig.json' "$D/members.txt" \
         || { echo "backup smoke FAILED: serverconfig.json missing from tar"; cat "$D/members.txt"; exit 1; }
-      # A restore without the whitelist/bans locks players out (or lets them back in).
+      # Restore must include whitelist/bans (player lockout).
       grep -qx 'Playerdata/playerswhitelisted.json' "$D/members.txt" \
         || { echo "backup smoke FAILED: Playerdata missing from tar"; cat "$D/members.txt"; exit 1; }
       grep -qx 'ModConfig/primitivesurvival.json' "$D/members.txt" \
         || { echo "backup smoke FAILED: ModConfig missing from tar"; cat "$D/members.txt"; exit 1; }
-      # Stale .part files from a killed run must be swept, not left to accumulate.
+      # Stale .part files from killed runs must be swept.
       [ ! -f "$D/dest/saves-20000101T000000Z.tar.gz.part" ] \
         || { echo "backup smoke FAILED: stale .part not cleaned up"; ls -la "$D/dest"; exit 1; }
       echo "backup smoke OK"
 
-# Turns a URL pin into a tracked "<internal modid>: <version>" pin, but only when that the tracked
-# pin would resolve to exactly the bytes the URL served (the resolver's --promote). The line then
-# costs one pod restart and zero network, and Renovate owns the updates from its next run.
+# URL pin -> tracked pin via resolver's --promote.
 promote:vints-mods:
   stage: maintenance
   image: quay.io/containers/podman:v5.8.7-immutable
-  # Its own pipeline schedule (`RUN_KIND=promote`) so it never shares a pipeline with the renovate
-  # job: main is fast-forward-only, and a promote branch born behind the tip can never merge.
+  # Own schedule (RUN_KIND=promote); branch cut from tip merges.
   rules:
     - if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
       changes:
@@ -585,7 +558,7 @@ promote:vints-mods:
     - if: $CI_PIPELINE_SOURCE == "schedule" && $RUN_KIND == "promote"
     - when: never
   script:
-    # curl and unzip already ship in this image; only jq is missing.
+    # Image ships curl+unzip; only jq missing.
     - dnf -y -q install jq
     - |
       set -euo pipefail
@@ -596,21 +569,19 @@ promote:vints-mods:
       export VS_VERSION
       BRANCH="mods/promote-url-pins-$(date -u +%Y%m%dT%H%M%SZ)"
 
-      # Cut from main's current tip, not this pipeline's checkout: a promote branch that starts
-      # behind main can never merge.
+      # Cut from main's tip; branch started behind can't merge.
       git fetch -q origin "$CI_DEFAULT_BRANCH"
       git checkout -q -B "$BRANCH" FETCH_HEAD
       echo "promoting from $CI_DEFAULT_BRANCH at $(git rev-parse HEAD)"
 
-      # The URL lives on the pin line, so keep the pre-promote file for the MR description.
+      # Keep pre-promote file; URL lives on the pin line.
       before="$(mktemp)"
       cp "$PINS" "$before"
       out=$(pulumi/my-apps/containers/server/entrypoints/resolve-vints-mods.sh --promote --mods "$PINS")
       echo "$out"
       COUNT=$(grep -c '^\[mods\] promote: ' <<<"$out" || true)
 
-      # Older promote artifacts are superseded whether or not this run has work: close the MRs (no
-      # pings) and delete the branches, including ones whose MR was already closed by hand.
+      # Close stale promote MRs and delete stale branches.
       while read -r iid; do
         curl -fsS -o /dev/null -X PUT -H "PRIVATE-TOKEN: $RENOVATE_TOKEN" \
           "$CI_API_V4_URL/projects/$CI_PROJECT_ID/merge_requests/$iid" \
@@ -637,8 +608,7 @@ promote:vints-mods:
         exit 0
       fi
 
-      # One block per promoted mod: the URL pin, then what it became. Push options cannot carry a
-      # multi-line description, so the MR is created through the API instead.
+      # One block per promoted mod; API creates the MR.
       DESC_FILE="$(mktemp)"
       while IFS= read -r line; do
         rest="${line#*promote: }"
@@ -653,7 +623,7 @@ promote:vints-mods:
       [[ -s "$DESC_FILE" ]] \
         || { echo "FATAL: could not build an MR description from $COUNT promote line(s)"; exit 1; }
 
-      # Commit as the token's own user (a project access token's bot user), never as a human.
+      # Commit as the token's bot user, never a human.
       IDENT=$(curl -fsS -H "PRIVATE-TOKEN: $RENOVATE_TOKEN" "$CI_API_V4_URL/user")
       GIT_NAME=$(jq -r '.name // empty' <<<"$IDENT")
       GIT_EMAIL=$(jq -r '.email // empty' <<<"$IDENT")

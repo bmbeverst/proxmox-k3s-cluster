@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Seeds runtime config into the Paseo home volume, then runs the base entrypoint.
+# Seed runtime config, then run the base entrypoint.
 set -euo pipefail
 
 export HOME="${HOME:-/home/paseo}"
@@ -16,16 +16,14 @@ as_paseo() { if [ "$IS_ROOT" = true ]; then gosu paseo "$@"; else "$@"; fi; }
 
 echo "[paseo-ops] preflight: uid=$(id -u) home=$HOME cline_dir=$CLINE_CONFIG_DIR"
 
-# --- 1. Chown first: `install -d -o X` skips parents, so install fails EACCES.
+# --- 1. Chown first: install -o skips parents (EACCES).
 mkdir -p "$PASEO_HOME" "$CLINE_CONFIG_DIR/data/settings" /workspace
 if [ "$IS_ROOT" = true ]; then
   chown -R paseo:paseo "$HOME" /workspace
 fi
 echo "[paseo-ops] ownership set: $(stat -c '%n %u:%g %a' "$CLINE_CONFIG_DIR" "$CLINE_CONFIG_DIR/data/settings")"
 
-# --- 2. Daemon config: plugins, web UI, Cline ACP provider. Rewritten when it differs.
-# Model list comes from the installed CLI, so a bump cannot leave it stale.
-# Canonical <provider>/ ids only: the catalog also carries aliases.
+# --- 2. Daemon config from installed CLI model catalog.
 LLMS_MODELS="${CLINE_MODELS_MODULE:-/usr/local/lib/node_modules/cline/node_modules/@cline/llms/dist/models.js}"
 MODEL_PROVIDER="${CLINE_MODELS_PROVIDER:-cline-pass}"
 DEFAULT_MODEL="${CLINE_DEFAULT_MODEL:-cline-pass/deepseek-v4.1-flash}"
@@ -84,7 +82,7 @@ else
 fi
 rm -f "$cfg"
 
-# --- 3. Credentials from the Secret; a missing seed is fatal, not a warning.
+# --- 3. Credentials from Secret; missing seed is fatal.
 if [ -f "$SEED" ]; then
   install -m 0600 -o paseo -g paseo "$SEED" "$CLINE_CONFIG_DIR/data/settings/providers.json" 2>/dev/null \
     || { cp "$SEED" "$CLINE_CONFIG_DIR/data/settings/providers.json"; chmod 0600 "$CLINE_CONFIG_DIR/data/settings/providers.json"; }

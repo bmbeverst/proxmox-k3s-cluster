@@ -1,7 +1,5 @@
 #!/usr/bin/env bash
-# Tar the world + config to the NFS share, keep the 7 newest backups.
-# Members mirror $DATA_PATH: restore with tar -xzf saves-<ts>.tar.gz -C /data
-# Runs under /bin/sh (busybox ash): no bash arrays.
+# Tar world + config to NFS; keep 7 newest.
 set -euo pipefail
 
 DATA_PATH="${DATA_PATH:-/data}"
@@ -9,7 +7,7 @@ BACKUP_DEST="${BACKUP_DEST:?BACKUP_DEST required}"   # mount path of the NFS sha
 SNAP="$DATA_PATH/.backup-snap"
 TS="$(date -u +%Y%m%dT%H%M%SZ)"
 
-# Sweep stale .part files: the prune below only matches finished archives.
+# Remove stale .part files the prune would miss.
 rm -f "$BACKUP_DEST"/saves-*.tar.gz.part
 
 if [[ ! -d "$DATA_PATH/Saves" ]]; then
@@ -17,12 +15,12 @@ if [[ ! -d "$DATA_PATH/Saves" ]]; then
   exit 0
 fi
 
-# Copy the world first: a frozen copy cannot be torn by a late writer.
+# Snapshot the world first: avoids a torn copy.
 rm -rf "$SNAP"
 mkdir -p "$SNAP/Saves"
 cp -a "$DATA_PATH/Saves/." "$SNAP/Saves/"
 
-# serverconfig.json pins "SaveFileLocation" (an absolute path) + the world settings.
+# serverconfig.json pins SaveFileLocation + world settings.
 members="Saves"
 if [[ -f "$DATA_PATH/serverconfig.json" ]]; then
   cp -a "$DATA_PATH/serverconfig.json" "$SNAP/serverconfig.json"
@@ -45,7 +43,7 @@ echo "[backup] taring $members -> $final"
 # shellcheck disable=SC2086
 tar -C "$SNAP" -czf "$tmp" $members
 rm -rf "$SNAP"
-# Atomic on the NFS share: the tar never appears under its final name until complete.
+# Atomic rename: the tar appears only when complete.
 mv -f "$tmp" "$final"
 
 echo "[backup] pruning to newest 7"

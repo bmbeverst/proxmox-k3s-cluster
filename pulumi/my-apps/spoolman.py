@@ -78,8 +78,7 @@ def register(namespace):
                 metadata=ObjectMetaArgs(labels={"app": "spoolman"}),
                 spec=k8s.core.v1.PodSpecArgs(
                     priority_class_name="app-low",
-                    # Must start as root: entrypoint chowns data dir, then gosu-drops.
-                    # No run_as_non_root. fs_group covers the PVC until that chown.
+                    # Root first: chown data dir, then gosu-drops.
                     security_context=k8s.core.v1.PodSecurityContextArgs(
                         fs_group=SPOOLMAN_UID,
                     ),
@@ -153,8 +152,7 @@ def register(namespace):
         opts=pulumi.ResourceOptions(depends_on=[namespace, spoolman_storage]),
     )
 
-    # LAN LoadBalancer on a static kube-vip VIP. No Tailscale: Spoolman is
-    # local-network only, so it takes a VIP from the pool instead of an ingress.
+    # LAN-only kube-vip VIP; no Tailscale ingress.
     spoolman_service = k8s.core.v1.Service(
         "spoolman",
         metadata=ObjectMetaArgs(name="spoolman", namespace=NAMESPACE),
@@ -173,7 +171,7 @@ def register(namespace):
         opts=pulumi.ResourceOptions(depends_on=[namespace, spoolman]),
     )
 
-    # Script ships in the manifest, so changing it needs no image build.
+    # Script ships via manifest; no image rebuild needed.
     spoolman_backup_script = k8s.core.v1.ConfigMap(
         "spoolman-backup-script",
         metadata=ObjectMetaArgs(name="spoolman-backup-script", namespace=NAMESPACE),
@@ -181,8 +179,7 @@ def register(namespace):
         opts=pulumi.ResourceOptions(depends_on=[namespace]),
     )
 
-    # Nightly snapshot to NFS. 01:00, an hour after the vints backup.
-    # No scale-to-zero: SQLite backup API reads through the WAL while app serves.
+    # Nightly 01:00 NFS snapshot; SQLite backup reads through WAL.
     spoolman_backup = k8s_batch.v1.CronJob(
         "spoolman-backup",
         metadata=ObjectMetaArgs(name="spoolman-backup", namespace=NAMESPACE),
@@ -201,8 +198,7 @@ def register(namespace):
                         metadata=ObjectMetaArgs(labels={"app": "spoolman-backup"}),
                         spec=k8s.core.v1.PodSpecArgs(
                             restart_policy="Never",
-                            # uid 1000: WAL reads need -shm write. fs_group for PV.
-                            # gid 1001: NFS export grant. Groups work, no host uid.
+                            # uid 1000 (WAL -shm); gid 1001 (NFS grant).
                             security_context=k8s.core.v1.PodSecurityContextArgs(
                                 run_as_user=SPOOLMAN_UID,
                                 run_as_group=SPOOLMAN_UID,

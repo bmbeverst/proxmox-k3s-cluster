@@ -21,31 +21,23 @@ class NodeConfig(TypedDict):
     full_clone: NotRequired[bool]
 
 
-# ---------------------------------------------------------------------------
-# Configuration — change values here, everything else follows.
-# ---------------------------------------------------------------------------
+# Configuration: change values here, everything else follows.
 NODES: list[NodeConfig] = [
-    # Two servers on pve, one on pve2 (s1/s2/s3). node3 was retired in Phase 6.2
-    # after node4 rejoined: adding first, removing second kept etcd at 3+ members.
+    # Servers on pve/pve2; node3 retired after node4 rejoined.
     {"name": "node1", "vm_id": 111, "ip": "10.10.1.41/24"},
     {"name": "node2", "vm_id": 112, "ip": "10.10.1.42/24"},
-    # s3: server on pve2. The template only exists on pve, so a cross-node clone
-    # has to be full — which is also what pvesr needs to replicate the disk.
-    # cache=unsafe is a deliberate override (2026-10-22): pve2's data pool is
-    # spinning rust and cache=none made etcd unusably slow. Tradeoff: an
-    # acknowledged write can be lost on a host power cut. Revisit when pve2
-    # gets an SSD or a SLOG.
+    # node4: full clone + cache=unsafe (spinning-rust pve2 pool; etcd).
     {
         "name": "node4",
         "vm_id": 102,
         "ip": "10.10.1.44/24",
         "node_name": "pve2",
-        # 2026-10-22: gave 1 GiB to node6 (paseo is too heavy for a 6 GiB worker).
+        # 2026-10-22: 1 GiB to node6 (paseo-heavy).
         "memory_mb": 5120,
         "cache": "unsafe",
         "full_clone": True,
     },
-    # a1: heavy worker on pve, gets the RAM/CPU the two servers leave.
+    # a1: heavy worker on pve.
     {
         "name": "node5",
         "vm_id": 115,
@@ -55,9 +47,7 @@ NODES: list[NodeConfig] = [
         "disk_gb": 40,
         "full_clone": True,
     },
-    # a2: worker on pve2. cache=unsafe for the same reason as node4: pve2's
-    # data pool is spinning rust. 2026-10-22: 8192 MiB (was 6144) — paseo
-    # OOM-starved this node when it drifted here; +1 GiB taken from node4.
+    # a2: cache=unsafe like node4; 8192 MiB after paseo OOM.
     {
         "name": "node6",
         "vm_id": 116,
@@ -71,18 +61,17 @@ NODES: list[NodeConfig] = [
 ]
 
 TEMPLATE_VM_ID = 9002
-# Where the template lives; VMs may be cloned to another node_name.
+# Where the template lives; VMs may clone elsewhere.
 TEMPLATE_NODE = "pve"
 ON_BOOT = False
 
-# Per-VM defaults: a control-plane VM on pve, cloned (not copied) from TEMPLATE_NODE.
+# Per-VM defaults: control-plane VMs cloned from TEMPLATE_NODE.
 DEFAULT_NODE_NAME = "pve"
 DEFAULT_DATASTORE = "data"
 DEFAULT_CORES = 2
 DEFAULT_MEMORY_MB = 6144  # 6 GiB for a server; no floating = no balloon
 DEFAULT_DISK_GB = 24
-# PVE's default for a VM disk. Never `unsafe`: it ignores the guest's flushes, so
-# an etcd write it acknowledges can be lost on a host power cut.
+# Never `unsafe`: ignores flushes; etcd writes can be lost.
 DEFAULT_DISK_CACHE = "none"
 DEFAULT_FULL_CLONE = False
 
@@ -92,7 +81,7 @@ GATEWAY = "10.10.1.1"
 
 # Username baked into the template (Flatcar default is `core`).
 CLOUDINIT_USER = "core"
-# SSH public key is read from this path at run time.
+# SSH public key read at run time.
 SSH_KEY_PATH = os.path.expanduser("~/.ssh/id_rsa.pub")
 
 
@@ -128,9 +117,7 @@ for node in NODES:
             "vm_id": TEMPLATE_VM_ID,
             "node_name": TEMPLATE_NODE,
             "full": full_clone,
-            # `datastore_id` is only valid for FULL clones. PVE refuses it for
-            # linked clones, which inherit the template's datastore (9002 is
-            # on `data`), so we omit it for linked clones.
+            # `datastore_id` only valid for full clones; PVE rejects otherwise.
             **({"datastore_id": datastore} if full_clone else {}),
         },
         agent={
@@ -160,13 +147,7 @@ for node in NODES:
                 "size": disk_gb,
             },
         ],
-        # hookscript and args (the Flatcar -fw_cfg ignition pointer) are
-        # deliberately absent: PVE only lets root@pam set them, and this stack
-        # auths as the least-privilege pulumi@pve user (PROXMOX-USER-AUTH.md).
-        # Both arrive without root anyway: clones inherit the template 9002's
-        # hookscript, and hook-fcar.sh sets the fw_cfg args at the VM's first
-        # pre-start. Both are in ignore_changes so node1-3's state-held values
-        # (set in a root context, pre least-privilege user) are never purged.
+        # Root-only fields; template 9002 provides them (see ignore_changes).
         network_devices=[
             {
                 "bridge": BRIDGE,
@@ -199,7 +180,7 @@ for node in NODES:
                 "keys": [ssh_public_key],
             },
         },
-        # Ignore harmless current-state drift so updates don't try to "fix" it.
+        # Ignore harmless drift; updates shouldn't "fix" it.
         opts=pulumi.ResourceOptions(
             ignore_changes=[
                 "agent",
@@ -212,8 +193,7 @@ for node in NODES:
                 "networkInterfaceNames",
                 "ipv4Addresses",
                 "ipv6Addresses",
-                # Root-only fields (see the comment above network_devices):
-                # present in state for node1-3, absent from code forever.
+                # Root-only fields: in state for node1-3, never in code.
                 "hookScriptFileId",
                 "kvmArguments",
             ]

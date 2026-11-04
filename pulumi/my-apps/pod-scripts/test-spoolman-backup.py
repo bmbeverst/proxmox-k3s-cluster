@@ -78,7 +78,7 @@ def main() -> int:
         print("\n1. live WAL database: snapshot must contain the newest commits")
         data, dest = root / "c1" / "data", root / "c1" / "dest"
         live = make_live_db(data)
-        # Guard against a false pass: empty WAL means nothing to lose.
+        # Guard: empty WAL would give a false pass.
         wal = data / "spoolman.db-wal"
         check(
             "WAL is non-empty (test precondition)",
@@ -91,7 +91,7 @@ def main() -> int:
         check("exactly one snapshot", len(snaps) == 1, f"found {len(snaps)}")
         if snaps:
             got = rows_in(Path(snaps[0]))
-            # 50 = 10 checkpointed + 40 in WAL. Naive copy yields 10.
+            # 50 rows: 10 checkpointed + 40 in WAL.
             check("all 50 rows present", got == 50, f"got {got}")
             conn = sqlite3.connect(snaps[0])
             check(
@@ -146,7 +146,7 @@ def main() -> int:
         check("non-zero exit", proc.returncode != 0)
         check("no debris", not list(dest6.glob("*")), f"{list(dest6.glob('*'))}")
 
-        # --- 7. KEEP=0 must not delete the new snapshot ---------------------
+        # --- 7. KEEP=0 never deletes the fresh snapshot ---------------------
         print("\n7. KEEP=0 is clamped to 1 (never deletes the fresh snapshot)")
         dest7 = root / "c7" / "dest"
         proc = run(data, dest7, KEEP=0)

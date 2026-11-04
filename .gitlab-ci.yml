@@ -3,7 +3,7 @@
 # Secret Detection customization: https://docs.gitlab.com/user/application_security/secret_detection/pipeline/configure
 # Dependency Scanning customization: https://docs.gitlab.com/ee/user/application_security/dependency_scanning/#customizing-the-dependency-scanning-settings
 # Container Scanning customization: https://docs.gitlab.com/ee/user/application_security/container_scanning/#customizing-the-container-scanning-settings
-# Note that environment variables can be set in several places
+# Environment variables can be set in several places
 # See https://docs.gitlab.com/ee/ci/variables/#cicd-variable-precedence
 stages:
   - test # template security scans (semgrep-sast, secret_detection) default here
@@ -12,19 +12,15 @@ stages:
   - smoke # boot the built images and assert they actually start
   - maintenance
 
-# Security scans are gated with job `rules:` (config-time), not
-# SAST_DISABLED / SECRET_DETECTION_DISABLED: those are pipeline variables
-# (Run pipeline form, `git push -o ci.variable=...`) which take highest
-# precedence and would let anyone skip the scans on demand.
+# Scans gated by job rules, not DISABLED pipeline vars
 include:
   - template: Security/SAST.gitlab-ci.yml
   - template: Security/Secret-Detection.gitlab-ci.yml
   - template: Security/Container-Scanning.gitlab-ci.yml
-  # Container build + scan jobs live here to keep the root pipeline lean.
+  # Build + scan jobs live in containers.yml.
   - local: .gitlab/ci/containers.yml
 
-# Hooks are local config (core.hooksPath) and Git never clones them, so enable
-# them once per clone with `make hooks` (see README).
+# Enable once per clone: make hooks (see README)
 
 variables:
   SECRET_DETECTION_ENABLED: "true"
@@ -37,11 +33,11 @@ lint:python:
     - if: $CI_PIPELINE_SOURCE == "schedule" && $CI_PIPELINE_SCHEDULE_DESCRIPTION == "weekly SAST"
     - when: never
   variables:
-    # Inside the checkout so the cache below can save them.
+    # Inside the checkout so cache saves them.
     PRE_COMMIT_HOME: "$CI_PROJECT_DIR/.cache/pre-commit"
     UV_CACHE_DIR: "$CI_PROJECT_DIR/.cache/uv"
   cache:
-    # Hook envs and uv wheels, keyed on uv.lock + hook config.
+    # Keyed on uv.lock + hook config.
     key:
       files:
         - uv.lock
@@ -53,35 +49,29 @@ lint:python:
     # python:3.13-slim has neither git (pre-commit requires it) nor uv.
     - apt-get update && apt-get install -y --no-install-recommends git
     - pip install --quiet uv
-    # Only the lint group: the Pulumi SDKs are not needed to run the hooks, and
-    # --frozen fails on uv.lock drift instead of silently re-locking.
+    # Lint group only; --frozen fails on uv.lock drift.
     - uv sync --only-group lint --frozen
-    # Hooks fix files in place and then fail, so a formatting error surfaces as a
-    # diff in the job log; nothing is pushed back.
+    # Hooks fix in place then fail, surfacing job-log diffs.
     - uv run --frozen --only-group lint pre-commit run --all-files --show-diff-on-failure
 
-# SAST runs only on the "weekly SAST" pipeline schedule, never on a push.
+# Weekly SAST schedule only, never on push.
 semgrep-sast:
   rules:
     - if: $CI_PIPELINE_SOURCE == "schedule" && $CI_PIPELINE_SCHEDULE_DESCRIPTION == "weekly SAST"
     - when: never
 
-# Secret detection runs on pushes to the default branch only; renovate branches skip it.
+# Default-branch pushes only; renovate branches skip it.
 secret_detection:
   rules:
     - if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
     - when: never
 
-# Renovate branches only bump a version line, so no other job's rules match and
-# GitLab persists no pipeline at all - which makes the MR unmergeable (auto-merge
-# needs a successful pipeline) and stalls the Pulumi deploys. This always-present
-# job keeps a successful pipeline on renovate branches.
+# Keeps a pipeline on renovate branches (auto-merge needs one).
 keepalive:renovate:
   stage: test
   image: alpine:3.22
   script:
-    # Single-quoted so YAML keeps it a string; unquoted, the `: ` inside the
-    # echo makes YAML parse it as a mapping and GitLab rejects the config.
+    # Single-quoted: unquoted colon breaks YAML parsing.
     - 'echo "renovate branch: nothing to build"'
   rules:
     - if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH =~ /^renovate\//
@@ -96,9 +86,9 @@ renovate:
   variables:
     RENOVATE_PLATFORM: "gitlab"
     RENOVATE_REPOSITORIES: $CI_PROJECT_PATH
-    # Install python + uv at runtime so pep621 can refresh uv.lock.
+    # Install python + uv so pep621 can refresh uv.lock
     RENOVATE_BINARY_SOURCE: "install"
-    # Keep the runtime tool installs (python, uv) and the repo cache between runs.
+    # Persist runtime tools and repo cache between runs.
     RENOVATE_BASE_DIR: "$CI_PROJECT_DIR/renovate"
     RENOVATE_CONTAINERBASE_DIR: "$CI_PROJECT_DIR/renovate/cache/containerbase"
     # Container registry auth for docker datasource (detectHostRulesFromEnv)
@@ -106,13 +96,12 @@ renovate:
     DOCKER_REGISTRY_GITLAB_COM_USERNAME: "gitlab-ci-token"
     DOCKER_REGISTRY_GITLAB_COM_PASSWORD: $CI_JOB_TOKEN
   cache:
-    # Repo cache plus the containerbase tool cache live under one key.
+    # Repo and containerbase caches under one key.
     key: renovate
     paths:
       - renovate/cache/
   script:
     - renovate
   rules:
-    # Runs on the "renovate 3x week" schedule: any schedule that is not the
-    # promote run and not the weekly SAST run.
+    # Any schedule except promote and weekly SAST runs.
     - if: $CI_PIPELINE_SOURCE == "schedule" && $RUN_KIND != "promote" && $CI_PIPELINE_SCHEDULE_DESCRIPTION != "weekly SAST"

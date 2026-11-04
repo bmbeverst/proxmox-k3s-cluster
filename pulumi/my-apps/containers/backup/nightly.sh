@@ -1,5 +1,5 @@
 #!/usr/bin/env sh
-# Stop the server, back up the world, start the server again.
+# Stop the server, back up, restart.
 set -euo pipefail
 
 NAMESPACE="${NAMESPACE:-vintagestory}"
@@ -12,7 +12,7 @@ scale() {
   kubectl -n "$NAMESPACE" scale "deployment/$DEPLOYMENT" --replicas="$1"
 }
 
-# No service account token means no cluster (CI smoke test): just back up.
+# No SA token (CI smoke test): just back up.
 if [ ! -f "$SA_TOKEN" ]; then
   echo "[nightly] no in-cluster config: backing up the running server"
   exec /bin/sh /backup.sh
@@ -21,7 +21,7 @@ fi
 echo "[nightly] stopping $NAMESPACE/$DEPLOYMENT for a quiesced backup"
 scale 0
 
-# Wait for the server to be gone, or the tar catches a half-written world.
+# Wait for pod deletion; else tar a half-written world.
 if [ -n "$(kubectl -n "$NAMESPACE" get pods -l "$POD_SELECTOR" -o name)" ]; then
   kubectl -n "$NAMESPACE" wait --for=delete pod -l "$POD_SELECTOR" --timeout="$STOP_TIMEOUT"
 fi

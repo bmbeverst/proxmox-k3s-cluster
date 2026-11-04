@@ -33,7 +33,7 @@ if not src.exists():
 
 dest_dir.mkdir(parents=True, exist_ok=True)
 
-# Sweep stale .part and sidecars: prune only matches finished snapshots.
+# Sweep stale .part sidecars; prune only matches finished snapshots.
 for stale in dest_dir.glob("spoolman-*.db.part*"):
     stale.unlink(missing_ok=True)
 
@@ -46,7 +46,7 @@ def snapshot() -> None:
     """Copy the live DB into `part`, retrying while the source is busy."""
     for attempt in range(1, ATTEMPTS + 1):
         try:
-            # Read-write on purpose: WAL reads join the -shm index, mode=ro cannot.
+            # Read-write: WAL reads join -shm, mode=ro cannot.
             with sqlite3.connect(src) as source, sqlite3.connect(part) as target:
                 source.backup(target)
             return
@@ -62,13 +62,12 @@ print(f"[backup] snapshotting {src} -> {final}")
 try:
     snapshot()
 except sqlite3.Error as exc:
-    # Corrupt source: fail loudly, leave no partial snapshot to trip the prune.
+    # Corrupt source: fail loudly, leave no partial snapshot.
     part.unlink(missing_ok=True)
     print(f"[backup] could not read {src}: {exc}", file=sys.stderr)
     sys.exit(1)
 
-# Verify, then fold WAL sidecars back so the snapshot is one self-contained file.
-# Spoolman re-enables WAL on its next start.
+# Verify, fold WAL sidecars; Spoolman re-enables WAL.
 with sqlite3.connect(part) as check:
     verdict = check.execute("PRAGMA integrity_check").fetchone()[0]
     if verdict != "ok":
@@ -78,12 +77,11 @@ with sqlite3.connect(part) as check:
         sys.exit(1)
     check.execute("PRAGMA journal_mode=DELETE")
 
-# Conversion removed them, but an earlier half-run may have left one. Only
-# matches "<part>-wal"/"<part>-shm", never the snapshot itself.
+# Sweep leftover half-run sidecars, never the snapshot.
 for leftover in dest_dir.glob(f"{part.name}-*"):
     leftover.unlink(missing_ok=True)
 
-# Atomic on NFS: never visible under the final name until complete and verified.
+# Atomic on NFS; invisible until complete and verified.
 os.replace(part, final)
 print(f"[backup] wrote {final.name} ({final.stat().st_size} bytes)")
 

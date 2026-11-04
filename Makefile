@@ -1,8 +1,6 @@
-# Dev helpers for the repo root. The deploy tooling keeps its own Makefile
-# (pyinfra/Makefile, ansible/Makefile).
+# Dev helpers; deploy tooling keeps its own Makefile
 #
-# --only-group lint: the Pulumi SDKs are not needed to run the hooks, and
-# skipping them keeps the lint env small.
+# --only-group lint: Pulumi SDKs unneeded for hooks
 PY := uv run --only-group lint
 
 .PHONY: hooks lint lint-ci
@@ -13,12 +11,10 @@ hooks:
 	$(PY) pre-commit install --hook-type pre-push
 	@echo "pre-commit hook installed; run 'make lint' any time"
 
-# Apply the hooks to every file, not just the staged ones. Hooks fix files in
-# place, so re-stage afterwards if this changed anything.
+# Lints all files; re-stage if hooks changed anything.
 lint:
 	$(PY) pre-commit run --all-files
 
-# Exactly what CI runs. There is no read-only mode: pre-commit hooks fix and then
-# fail, which is what makes them useful on an ephemeral CI checkout.
+# Exactly what CI runs; hooks fix then fail.
 lint-ci:
 	$(PY) pre-commit run --all-files --show-diff-on-failure

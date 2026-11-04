@@ -27,8 +27,7 @@ import paseo
 import spoolman
 import vintagestory
 
-# Each app lives in its own Namespace for isolation. The name for each app is
-# owned by its own module (ghost.NAMESPACE / vintagestory.NAMESPACE).
+# One namespace per app; names owned by their modules.
 ghost_namespace = k8s.core.v1.Namespace(
     "ghost",
     metadata=ObjectMetaArgs(name=ghost.NAMESPACE),

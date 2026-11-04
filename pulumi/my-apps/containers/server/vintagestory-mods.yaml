@@ -1,9 +1,4 @@
-# Mods this server runs. One entry per line: "<key>: <version|url>".
-#   key    the mod's internal Mod ID -> $DATA_PATH/Mods/<key>.zip (the game keys on the modid, not
-#          on the filename)
-#   value  a released mod version (Renovate tracks it) or a full https .zip URL (used verbatim)
-# The datasource for tracked entries lives in renovate.json (one per game minor), so adding a mod is
-# one line here and nothing else.
+# One "<key>: <version|url>" per line; key -> $DATA_PATH/Mods/<key>.zip.
 
 hudclockpatch: 4.4.1
 egocaribautomapmarkers: 5.0.3
@@ -12,9 +7,9 @@ prospecttogether: 2.2.1
 smithingplus: 1.9.0-rc.1
 bedspawnv2: 1.7.1
 
-# In-game mod config/conflict UI; also a hard dependency of yangtransport (>= 1.1.2).
+# Hard dependency of yangtransport (>= 1.1.2).
 integratedmodmanager: 1.1.3
-# Needed by the Phanerozoic dinosaur families and BetterRuins for their settings.
+# Needed by Phanerozoic dinos and BetterRuins.
 configlib: 1.13.2
 # Draconis and its two required libraries.
 draconis: 1.6.1
@@ -31,15 +26,15 @@ betterruins: 0.6.4
 wool: 1.9.6
 shearlib: 1.3.0
 darcesdriftersredone: 1.3.0
-# Legacy of the Phanerozoic (forked): the runtime plus one entry per dinosaur family.
+# Legacy of the Phanerozoic: runtime plus each family.
 dinocore: 2.0.0
 lopustegosauria: 2.0.0
 lopumacronaria: 2.0.0
 lopuceratopsidae: 2.0.0
 lopudromaeosauridae: 2.0.0
-# Successor to japanesearchitecture 0.9.7 (author-approved 0.9.8 patch); converts 0.9.7 blocks on load.
+# Author-approved successor to japanesearchitecture; converts 0.9.7 blocks.
 insuljapanesearchi: 1.0.3
-# Paddy Fields: last release is tagged only up to 1.22.3 and declares "game": "*".
+# Paddy Fields: last release declares game "*".
 ricepaddies: 1.0.4
 # 1.4.5/1.4.6 yanked upstream; Renovate owns bumps above 1.4.4.
 apelanterns: 1.4.4

@@ -12,9 +12,7 @@ from pulumi_kubernetes.core.v1 import Namespace, Secret
 from pulumi_kubernetes.helm.v3 import Release, ReleaseArgs
 from pulumi_kubernetes.meta.v1 import ObjectMetaArgs
 
-# Chart repo/version live in ../Chart.yaml so Renovate's built-in helmv3 manager
-# can bump the PKO chart version (the other charts live there too).
-# PKO bumps are manual: review the Renovate MR, then apply with `pulumi up` here.
+# Chart versions in ../Chart.yaml (Renovate); PKO bumps are manual.
 with open(os.path.join(os.path.dirname(__file__), "..", "Chart.yaml")) as f:
     _chart_deps = {d["name"]: d for d in yaml.safe_load(f)["dependencies"]}
 
@@ -138,7 +136,7 @@ pko = Release(
         values={
             "resources": {
                 "requests": {"cpu": "200m", "memory": "256Mi"},
-                # Only set to override the chart's 200m default: CPU should have no limit.
+                # Overrides the chart's CPU default; CPU shouldn't be limited.
                 "limits": {"cpu": "1", "memory": "512Mi"},
             },
         },
@@ -170,8 +168,7 @@ infra_apps = CustomResource(
     },
     api_version="pulumi.com/v1",
     kind="Stack",
-    # There is no way to check these values in the pulumi code
-    # Best way is to look at the CRD: https://github.com/pulumi/pulumi-kubernetes-operator/blob/master/deploy/crds/pulumi.com_stacks.yaml
+    # Can't validate in code; see the Stack CRD: https://github.com/pulumi/pulumi-kubernetes-operator/blob/master/deploy/crds/pulumi.com_stacks.yaml
     spec={
         "serviceAccountName": "pulumi",
         "envRefs": {
@@ -202,8 +199,7 @@ infra_apps = CustomResource(
         "workspaceTemplate": {
             "spec": {
                 "image": _PKO_IMAGE,
-                # pulumi/pulumi-python runs as root without $USER set; the
-                # pulumi CLI (CGO_ENABLED=0) needs USER to resolve the home path.
+                # Image lacks $USER; CLI needs it for home path.
                 "env": [
                     {"name": "USER", "value": "root"},
                     {"name": "HOME", "value": "/share"},
@@ -256,8 +252,7 @@ infra_bootstrap = CustomResource(
         "workspaceTemplate": {
             "spec": {
                 "image": _PKO_IMAGE,
-                # pulumi/pulumi-python runs as root without $USER set; the
-                # pulumi CLI (CGO_ENABLED=0) needs USER to resolve the home path.
+                # Image lacks $USER; CLI needs it for home path.
                 "env": [
                     {"name": "USER", "value": "root"},
                     {"name": "HOME", "value": "/share"},

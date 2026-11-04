@@ -1,17 +1,11 @@
 #!/usr/bin/env bash
-# Console client for the running server.
-#
-#   vints-console                       interactive: follow the log, type commands
-#   vints-console /list clients         one-shot: send one command and print its reply
-#
-# The server reads console commands from $CONSOLE_FIFO (see start-vints.sh), which is
-# write-only from our side; replies are read back from the server log.
+# Console client: commands via $CONSOLE_FIFO, replies from the log.
 set -euo pipefail
 
-# The pod env sets the path; the default keeps the CI smoke test and local runs working.
+# CONSOLE_FIFO default keeps CI smoke tests working.
 FIFO="${CONSOLE_FIFO:-/tmp/vints-console.fifo}"
 LOG="${DATA_PATH:-/data}/Logs/server-main.log"
-REPLY_TIMEOUT=10  # seconds to wait for the server to log that it handled our command
+REPLY_TIMEOUT=10  # seconds to wait for the reply
 
 [[ -p "$FIFO" ]] || { echo "vints-console: $FIFO is not a FIFO - is the server running?" >&2; exit 1; }
 
@@ -28,8 +22,7 @@ send() {
   printf '%s\n' "$*" >"$FIFO"
 }
 
-# Print what the server logs for our command, stopping once it says it handled it (plus a
-# short settle time for the reply lines that follow).
+# Print server log lines for our command until handled.
 print_reply_from() {
   local start=$1 i new
   for ((i = 0; i < REPLY_TIMEOUT * 2; i++)); do
@@ -37,8 +30,7 @@ print_reply_from() {
     new="$(print_lines_from "$start" || true)"
     [[ -n "$new" ]] || continue
     start=$((start + $(printf '%s\n' "$new" | wc -l)))
-    # Lines logged before the server says it handled the command are unrelated noise
-    # (autosaves, players joining), so start the output at that line.
+    # Skip pre-ack noise (autosaves, joins); start output here.
     if [[ "$new" == *"Handling Console Command"* ]]; then
       printf '%s\n' "$(printf '%s\n' "$new" | sed -n '/Handling Console Command/,$p')"
       sleep 1
@@ -71,6 +63,5 @@ while IFS= read -r "${prompt[@]}" line; do
   [[ -n "${line//[[:space:]]/}" ]] || continue
   send "$line"
 done
-# Piped input ends the session as soon as the last line is read; give the reply time to
-# reach the tail before exiting. An interactive session already showed it.
+# Piped input: let the reply reach the tail first.
 [[ -t 0 ]] || sleep 2

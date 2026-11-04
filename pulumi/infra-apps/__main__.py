@@ -26,7 +26,7 @@ with open(os.path.join(os.path.dirname(__file__), "..", "Chart.yaml")) as f:
 def _fix_suc_ssl_paths(
     args: pulumi.ResourceTransformArgs,
 ) -> Optional[pulumi.ResourceTransformResult]:
-    # Only touch the Deployment, leave other resources in the manifest alone
+    # Only touch the Deployment; leave other resources alone.
     if args.type_ != "kubernetes:apps/v1:Deployment":
         return None
 
@@ -88,8 +88,7 @@ kvcp = k8s.yaml.v2.ConfigFile(
     file=f"https://raw.githubusercontent.com/kube-vip/kube-vip-cloud-provider/{_versions['kvcp_version']}/manifest/kube-vip-cloud-controller.yaml",
 )
 
-# Global pool for LoadBalancer service IP assignment (key: range-global).
-# Must not overlap existing VIPs: .60 traefik, .90 ghost, .91 vints, .99 control-plane.
+# LB IP pool (range-global); avoids VIPs .60/.90/.91/.99.
 kvcp_pool = k8s.core.v1.ConfigMap(
     "kubevip",
     metadata={"name": "kubevip", "namespace": "kube-system"},
@@ -194,7 +193,7 @@ kured = k8s.helm.v3.Release(
                 ),
             },
             "configuration": {
-                # One node at a time: losing two of three control-plane nodes takes down etcd
+                # One node at a time (etcd quorum).
                 "concurrency": 1,
                 # Spacing: period caps reboot gap; lockReleaseDelay adds node grace.
                 "period": "2h",
@@ -297,8 +296,7 @@ kube_vip = k8s.helm.v3.Release(
     ),
 )
 
-# Worker kube-vip: serves Local-policy LBs with real client IPs.
-# Per-service election stays on; VIP pins to endpoint node.
+# Worker kube-vip: per-service election, real client IPs.
 kube_vip_lb = k8s.helm.v3.Release(
     "kube-vip-lb",
     k8s.helm.v3.ReleaseArgs(
@@ -367,7 +365,7 @@ piraeus_operator = k8s.helm.v3.Release(
 )
 
 
-# Backing store is a file-thin pool on the root disk
+# Backing store: file-thin pool on the root disk.
 piraeus = k8s.helm.v3.Release(
     "linstor-cluster",
     k8s.helm.v3.ReleaseArgs(
@@ -444,7 +442,7 @@ piraeus = k8s.helm.v3.Release(
             ],
             "storageClasses": [
                 {
-                    # local-path stays the default SC; linstor is opt-in per PVC
+                    # local-path stays default SC; linstor is opt-in per PVC.
                     "name": "linstor-r2",
                     "reclaimPolicy": "Retain",
                     "allowVolumeExpansion": True,

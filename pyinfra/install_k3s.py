@@ -15,8 +15,7 @@ tls_san = host.data.get("tls_san")
 
 k3s_token = host.data.get("k3s_token")
 
-# Role and Proxmox host come from the inventory; group_data/all.py holds the
-# server/pve defaults. Fail loudly rather than install with an empty label.
+# Role/host come from inventory; fail loudly on missing values.
 k3s_role = host.data.get("k3s_role")
 proxmox_host = host.data.get("proxmox_host")
 if not k3s_role or not proxmox_host:
@@ -51,7 +50,7 @@ else:
         print("Copied k3s config to local machine at k3s.yaml")
 
         # Wait for k3s to be ready on init node
-        # TODO fix that this executes after the curl commands, which is not correct
+        # TODO fix: this executes after the curl commands.
         # server.shell(
         #     name="Wait for k3s to be ready on init node",
         #     commands=[
@@ -62,8 +61,7 @@ else:
         # Get init node IP
         init_node_ip = host.data.get("init_node_ip")
 
-        # Robust wait: poll https://<init>:6443 up to ~90s, exiting non-zero if it
-        # never comes up (so pyinfra genuinely fails instead of silently passing).
+        # Poll init API ~90s; exit non-zero if never up.
         server.shell(
             name="Wait for init node k3s API to be reachable",
             commands=[
@@ -75,8 +73,7 @@ else:
         )
         # Install k3s as a server or a worker
         if k3s_role == "agent":
-            # Agents join with K3S_URL instead of the server flags; the cluster
-            # token is the same one the servers use.
+            # Agents join via K3S_URL with the shared cluster token.
             server.shell(
                 name="Install k3s agent",
                 commands=[
@@ -89,7 +86,7 @@ else:
                 commands=[
                     f'curl -sfL https://get.k3s.io | INSTALL_K3S_SKIP_SELINUX_RPM=true sh -s - --secrets-encryption --token "{k3s_token}" --tls-san "{tls_san}" --server "https://{init_node_ip}:6443"'  # pylint: disable=line-too-long
                 ],
-                # _timeout=120, # This can be an issue due to GitHub throttling
+                # _timeout=120; GitHub throttling risk.
             )
 
 
@@ -137,7 +134,7 @@ systemd.service(
     _sudo=True,
 )
 
-# Set REBOOT_STRATEGY=off to stage OS updates, let kured coordinate the reboot.
+# Stage OS updates; kured coordinates reboots.
 files.line(
     name="Set REBOOT_STRATEGY=off so kured coordinates reboots",
     path="/etc/flatcar/update.conf",

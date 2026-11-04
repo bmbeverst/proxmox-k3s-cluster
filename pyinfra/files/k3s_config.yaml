@@ -15,22 +15,18 @@ systemReserved:
   cpu: "100m" # Reserve 100 millicores for OS
   memory: "150Mi" # Reserve 150MB for system processes
 
-# kube-vip owns LoadBalancer VIPs, so ServiceLB must be off.
-# Server-only keys: k3s agents reject flags they don't define (systemReserved
-# fatalled node5's install; ServiceLB never runs on an agent anyway).
+# kube-vip owns LB VIPs; server-only keys, agents reject them.
 disable:
   - servicelb
 {% endif %}
 
 {% if k3s_role == 'agent' %}
-# Agents have no apiserver to advertise: advertise-address is a server-only
-# flag and k3s refuses to start an agent that is given it.
+# advertise-address is server-only; agents refuse to start with it.
 node-ip: "{{ advertise_address }}"
 {% else %}
 advertise-address: "{{ advertise_address }}"
 {% endif %}
 
-# Which Proxmox host this VM runs on. Not discoverable from inside the guest
-# (DMI reports QEMU, not the host), so the inventory passes it in.
+# Proxmox host not discoverable in-guest; inventory passes it in.
 node-label:
   - "proxmox-host={{ proxmox_host }}"
