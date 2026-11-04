@@ -410,6 +410,22 @@ def register(namespace):
                             ),
                         ),
                     ],
+                    affinity=k8s.core.v1.NodeAffinityArgs(
+                        preferred_during_scheduling_ignored_during_execution=[
+                            k8s.core.v1.PreferredSchedulingTermArgs(
+                                weight=100,
+                                preference=k8s.core.v1.NodeSelectorTermArgs(
+                                    match_expressions=[
+                                        k8s.core.v1.NodeSelectorRequirementArgs(
+                                            key="proxmox-host",
+                                            operator="In",
+                                            values=["pve"],
+                                        ),
+                                    ],
+                                ),
+                            ),
+                        ],
+                    ),
                 ),
             ),
         ),
