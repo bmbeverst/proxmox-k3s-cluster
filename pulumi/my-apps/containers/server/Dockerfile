@@ -12,12 +12,9 @@ RUN apt-get update \
 RUN useradd --system --uid 1001 --home-dir /serverfiles --shell /bin/bash vints \
  && mkdir -p /serverfiles /entrypoints \
  && chown -R vints:vints /serverfiles
-COPY entrypoints/ /entrypoints/
-RUN chmod +x /entrypoints/*.sh
-# Console entry point; FIFO path in start-vints.sh.
-RUN ln -s /entrypoints/vints-console.sh /usr/local/bin/vints-console
 
 # Pin mtimes; --stratum-prepare-only bakes the install for offline --stratum-skip-bootstrap.
+# Before the entrypoints COPY: an entrypoint edit must not re-run this layer.
 ARG VS_VERSION
 ARG STRATUM_VERSION
 ARG STRATUM_SHA256
@@ -43,6 +40,11 @@ RUN set -eux; \
     touch -h -d @0 /tmp; \
     drift="$(find /serverfiles -newermt @1 -print -quit)"; \
     test -z "$drift" || { echo "FATAL: $drift still carries a build-time mtime, so this layer re-diffs every build" >&2; exit 1; }
+
+COPY entrypoints/ /entrypoints/
+RUN chmod +x /entrypoints/*.sh
+# Console entry point; FIFO path in start-vints.sh.
+RUN ln -s /entrypoints/vints-console.sh /usr/local/bin/vints-console
 
 # Baked game + Stratum release; layer-mtimes smoke-job pin marker.
 LABEL org.opencontainers.image.version="${VS_VERSION}" \
