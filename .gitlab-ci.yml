@@ -41,8 +41,20 @@ lint:python:
     - if: $CI_PIPELINE_SOURCE == "schedule" && $CI_PIPELINE_SCHEDULE_DESCRIPTION == "weekly SAST"
     - when: never
   variables:
-    # pre-commit caches hook environments here; keep them inside the checkout.
+    # pre-commit caches hook environments here; keep them inside the checkout so
+    # the cache below can pick them up between the weekly runs.
     PRE_COMMIT_HOME: "$CI_PROJECT_DIR/.cache/pre-commit"
+    UV_CACHE_DIR: "$CI_PROJECT_DIR/.cache/uv"
+  cache:
+    # Warm env for the weekly run: pre-commit's hook environments and uv's wheel
+    # cache, keyed on the two files that decide their content.
+    key:
+      files:
+        - uv.lock
+        - .pre-commit-config.yaml
+    paths:
+      - .cache/pre-commit/
+      - .cache/uv/
   script:
     # python:3.13-slim has neither git (pre-commit requires it) nor uv.
     - apt-get update && apt-get install -y --no-install-recommends git

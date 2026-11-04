@@ -230,10 +230,46 @@ bake:vints-mods:
       PIN_COUNT=$(grep -c '^[^#[:space:]]' "$PINS" || true)
       [ "$PIN_COUNT" -gt 0 ] || { echo "FATAL: $PINS pins no mods"; exit 1; }
       IMG="$CI_REGISTRY_IMAGE/vints-mods:latest"
+      PINS_SHA=$(sha256sum "$PINS" | cut -d' ' -f1)
+
+      # The published bundle is the CI cache. Log in first so the pull can see the private
+      # registry, then: (a) if :latest already carries exactly these pins for this game
+      # version, the rebuild would produce identical bytes - exit without the ~86 MB of
+      # Mod DB downloads (this is the common path on branch rebase pushes); (b) otherwise
+      # seed the staging with the bundle so only changed mods are fetched.
+      podman login -u "$CI_REGISTRY_USER" -p "$CI_REGISTRY_PASSWORD" "$CI_REGISTRY" || true
+      SEED=""
+      if podman pull -q "$IMG" >/dev/null 2>&1; then
+        SEED_DIR=$(mktemp -d)
+        CTR=$(podman create "$IMG")
+        podman cp "$CTR:/bundle/." "$SEED_DIR/" || true
+        podman rm -f "$CTR" >/dev/null
+        BUNDLED=$(jq -r '.pins_sha256 // empty' "$SEED_DIR/bundle.json" 2>/dev/null || true)
+        BUNDLED_VS=$(jq -r '.vs_version // empty' "$SEED_DIR/bundle.json" 2>/dev/null || true)
+        if [ -n "$BUNDLED" ] && [ "$BUNDLED" = "$PINS_SHA" ] && [ "$BUNDLED_VS" = "$VS_VERSION" ]; then
+          echo "registry bundle already carries pins sha $PINS_SHA for game $VS_VERSION: nothing to do"
+          exit 0
+        fi
+        # Only keep the seed when it is a complete bundle; a partial extraction is worse
+        # than no seed because the catalog would claim bytes the depot does not hold.
+        if [ -f "$SEED_DIR/catalog.json" ]; then
+          SEED="$SEED_DIR"
+          echo "bundle is at pins sha '$BUNDLED' / game $BUNDLED_VS: staging with it as seed"
+        else
+          echo "pulled image holds no complete bundle: staging cold"
+        fi
+      else
+        echo "no published bundle to seed from: staging cold"
+      fi
 
       # The cold fetch check:vints-mods already does, staged into a real depot this time.
-      pulumi/my-apps/containers/server/entrypoints/resolve-vints-mods.sh \
-        --stage --mods "$PINS" --data-path .ci-depot
+      if [ -n "$SEED" ]; then
+        pulumi/my-apps/containers/server/entrypoints/resolve-vints-mods.sh \
+          --stage --mods "$PINS" --data-path .ci-depot --seed "$SEED"
+      else
+        pulumi/my-apps/containers/server/entrypoints/resolve-vints-mods.sh \
+          --stage --mods "$PINS" --data-path .ci-depot
+      fi
 
       # Package exactly the depot the cluster seeds from.
       rm -rf .ci-bundle
