@@ -253,6 +253,27 @@ bake:vints-mods:
           --stage --mods "$PINS" --data-path .ci-depot
       fi
 
+      # The seed can carry stale archives from the previous bundle; the bundle
+      # must hold exactly the pinned set, so prune the depot to the pins.
+      DEPOT=.ci-depot/.vints-mods/depot
+      CATALOG=.ci-depot/.vints-mods/catalog.json
+      MINOR="${VS_VERSION%.*}"
+      KEEP=$(mktemp)
+      while IFS= read -r line; do
+        key="${line%%:*}"
+        value="${line#*:}"
+        value="${value# }"
+        if [[ "$value" == https://* ]]; then catkey="url:$value:$MINOR"; else catkey="$key:$value:$MINOR"; fi
+        sha=$(jq -r --arg k "$catkey" '.[$k] // empty | if type == "string" then . else (.sha256 // empty) end' "$CATALOG")
+        [ -n "$sha" ] || { echo "FATAL: no catalog entry for pin '$key'"; exit 1; }
+        echo "$sha" >> "$KEEP"
+      done < <(awk '{ sub(/(^|[ \t])#.*/, ""); sub(/^[ \t]+|[ \t]+$/, ""); if (length) print }' "$PINS")
+      sort -u "$KEEP" -o "$KEEP"
+      for f in "$DEPOT"/*.zip; do
+        base=$(basename "$f" .zip)
+        grep -qx "$base" "$KEEP" || rm -f "$f"
+      done
+
       # Package exactly the depot the cluster seeds from.
       rm -rf .ci-bundle
       mkdir -p .ci-bundle/depot
