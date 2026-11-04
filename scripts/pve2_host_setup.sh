@@ -1,15 +1,10 @@
 #!/usr/bin/env bash
-# Re-apply the pve2 host state that a reinstall destroys.
-#
+# Re-apply pve2 host state lost on reinstall. Idempotent, safe to re-run.
 #   ./scripts/pve2_host_setup.sh [root@10.10.1.22]
-#
-# Three things, each idempotent and checked against the live host first:
-#   1. e1000e hardware-hang workaround (EEE + TSO/GSO/GRO/SG off on the physical NIC)
-#   2. swap/IO sysctl tuning; swap itself is never created, resized or removed
-#   3. ZFS ARC cap: 1.55 GiB, because pve2 runs ~12 GiB of VMs in 15.5 GiB of RAM
-#
-# Deliberately not pyinfra: pyinfra owns the k3s nodes only. This drives the
-# hypervisor over root ssh and is safe to re-run.
+#   1. e1000e workaround: EEE + TSO/GSO/GRO/SG off on the physical NIC
+#   2. swap/IO sysctl tuning (never creates, resizes or removes swap)
+#   3. ZFS ARC cap: 1.55 GiB (pve2 runs ~12 GiB VMs in 15.5 GiB RAM)
+# Not pyinfra: drives the hypervisor over root ssh.
 set -euo pipefail
 
 TARGET="${1:-root@10.10.1.22}"
@@ -28,8 +23,7 @@ echo "-- e1000e hang workaround"
 remote bash -s <<'REMOTE'
 set -euo pipefail
 
-# The physical NIC is whatever vmbr0 bridges to. The name is not stable across
-# installs (nic0 here, enp0s25/enp1s0 elsewhere), so read it, never hardcode it.
+# NIC name varies across installs; read from vmbr0 bridge-ports.
 nic=$(awk '/^iface vmbr0/{f=1} f && /bridge-ports/{print $2; exit}' /etc/network/interfaces)
 if [ -z "${nic:-}" ]; then
     echo "error: no bridge-ports found for vmbr0 in /etc/network/interfaces" >&2
@@ -37,9 +31,7 @@ if [ -z "${nic:-}" ]; then
 fi
 echo "   nic: $nic"
 
-# EEE off alone did not stop the hangs (5,385 in the 13 h it ran alone); the
-# offloads are the part that did. Both go in one retry loop because the link
-# may still be coming up when this runs.
+# EEE alone insufficient; offloads too; single retry loop.
 cat >/etc/systemd/system/e1000e-eee-off.service <<UNIT
 [Unit]
 Description=e1000e hardware-hang workaround: disable EEE + TSO/GSO/GRO/SG offloads on $nic (Intel I217-LM)
@@ -66,21 +58,23 @@ ethtool -k "$nic" | grep -E '^(scatter-gather|tcp-segmentation-offload|generic-r
 REMOTE
 
 # -------------------------------------------------------------------- swap
-echo "-- swap/IO sysctl tuning (swap is never created or resized)"
+echo "-- swap/IO sysctl tuning + swap zvol (swap is created once, never removed)"
 remote bash -s <<'REMOTE'
 set -euo pipefail
 
-# Report only: whether pve2 has swap is whatever the installer decided. This
-# script does not create, resize or remove it.
-if swapon --show --noheadings | grep -q .; then
-    swapon --show | sed 's/^/   /'
-else
-    echo "   no swap active (fine, nothing is created)"
+# Swap zvol on rpool is only a safety valve.
+if ! swapon --show --noheadings | grep -q .; then
+    echo "-- creating 8 GiB swap zvol on rpool"
+    zfs create -V 8G -o compression=off -o logbias=latency -o sync=standard rpool/swap
+    mkswap -f /dev/zvol/rpool/swap
+    swapon /dev/zvol/rpool/swap
+    echo "/dev/zvol/rpool/swap none swap sw 0 0" >> /etc/fstab
 fi
 
-# Swap as a safety valve, and HDD writeback that starts early instead of in one
-# burst at the dirty_ratio cap. Do not add vm.dirty_bytes here: it resets
-# dirty_ratio to 0 and the cap silently moves to 20% of RAM.
+echo "swap:"
+swapon --show | sed 's/^/   /'
+
+# Swap safety valve plus HDD writeback; avoid vm.dirty_bytes.
 cat >/etc/sysctl.d/99-vm-tuning.conf <<CONF
 vm.swappiness = 1
 vm.dirty_background_bytes = 268435456
@@ -100,14 +94,14 @@ if [ ! -d /sys/module/zfs ]; then
 fi
 
 cat >/etc/modprobe.d/zfs.conf <<CONF
-# pve2 runs ~12 GiB of VMs in 15.5 GiB of RAM, so the default ARC (50%) is far too big.
+# pve2 VMs leave too little RAM for default ARC.
 options zfs zfs_arc_max=${ARC_MAX_BYTES}
 CONF
 
 cur=$(cat /sys/module/zfs/parameters/zfs_arc_max)
 echo "   zfs_arc_max now: $cur"
 if [ "$cur" != "$ARC_MAX_BYTES" ]; then
-    # Runtime lowering works; raising needs the module option plus a reboot.
+    # Runtime lowering works; raising needs a reboot.
     if echo "$ARC_MAX_BYTES" >/sys/module/zfs/parameters/zfs_arc_max 2>/dev/null; then
         echo "   lowered at runtime to $ARC_MAX_BYTES"
     else
