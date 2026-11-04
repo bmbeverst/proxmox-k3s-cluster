@@ -29,11 +29,7 @@ include:
 variables:
   SECRET_DETECTION_ENABLED: "true"
 
-# Same hooks as the local pre-commit install, run by the same runner. The job
-# only runs on the "weekly SAST" schedule (alongside semgrep-sast): every-push
-# linting lives in the local pre-push hook instead, so pushes do not burn
-# compute minutes on formatting. A clone without hooks (or without `make lint`
-# first) can still merge unformatted code until the weekly run catches it.
+# Weekly only; the local pre-push hook guards pushes.
 lint:python:
   stage: test
   image: python:3.13-slim
@@ -41,13 +37,11 @@ lint:python:
     - if: $CI_PIPELINE_SOURCE == "schedule" && $CI_PIPELINE_SCHEDULE_DESCRIPTION == "weekly SAST"
     - when: never
   variables:
-    # pre-commit caches hook environments here; keep them inside the checkout so
-    # the cache below can pick them up between the weekly runs.
+    # Inside the checkout so the cache below can save them.
     PRE_COMMIT_HOME: "$CI_PROJECT_DIR/.cache/pre-commit"
     UV_CACHE_DIR: "$CI_PROJECT_DIR/.cache/uv"
   cache:
-    # Warm env for the weekly run: pre-commit's hook environments and uv's wheel
-    # cache, keyed on the two files that decide their content.
+    # Hook envs and uv wheels, keyed on uv.lock + hook config.
     key:
       files:
         - uv.lock

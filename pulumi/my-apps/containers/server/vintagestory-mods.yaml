@@ -41,8 +41,7 @@ lopudromaeosauridae: 2.0.0
 insuljapanesearchi: 1.0.3
 # Paddy Fields: last release is tagged only up to 1.22.3 and declares "game": "*".
 ricepaddies: 1.0.4
-# 1.4.5/1.4.6 were yanked from the Mod DB after release; 1.4.4 is the newest
-# release tagged for the 1.22.x line the image runs. Renovate owns bumps above it.
+# 1.4.5/1.4.6 yanked upstream; Renovate owns bumps above 1.4.4.
 apelanterns: 1.4.4
 justvinegar: 1.0.1
 vanillamoremolds: 2.2.0
