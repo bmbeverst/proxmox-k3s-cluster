@@ -1,34 +1,43 @@
 # Paseo + Cline + toolchain; Renovate tracks PASEO_BASE_TAG.
+# One stage per tool: a tool bump rebuilds only its stage plus the cheap COPYs.
 ARG PASEO_BASE_TAG=0.11.2
-FROM ghcr.io/getpaseo/paseo:${PASEO_BASE_TAG}
+# renovate: datasource=docker depName=ghcr.io/astral-sh/uv
+ARG UV_VERSION=0.13.0
 
-USER root
-# One layer per tool, least-frequently-updated first (Renovate cadence):
-# a bump invalidates only its own layer and everything after it.
-RUN set -eux; \
-    apt-get update; \
-    apt-get install -y --no-install-recommends python3 jq ca-certificates unzip tar; \
-    rm -rf /var/lib/apt/lists/*
-
+# Cline stage: reuses the paseo base (node + npm); no extra pull.
+FROM ghcr.io/getpaseo/paseo:${PASEO_BASE_TAG} AS cline
 # renovate: datasource=npm depName=cline
 ARG CLINE_VERSION=3.0.61
 RUN set -eux; \
-    npm_config_cache=/tmp/npmcache npm install -g "cline@${CLINE_VERSION}"; \
+    npm_config_cache=/tmp/npmcache npm install -g --prefix /opt/cline "cline@${CLINE_VERSION}"; \
     rm -rf /tmp/npmcache
 
+# Pulumi CLI stage: tarball fetch; all pulumi/* binaries, old layout kept.
+FROM ghcr.io/getpaseo/paseo:${PASEO_BASE_TAG} AS pulumi
 # renovate: datasource=github-releases depName=pulumi/pulumi
 ARG PULUMI_VERSION=3.261.0
 ENV PULUMI_SKIP_UPDATE_CHECK=true
 RUN set -eux; \
-    curl -fsSL https://get.pulumi.com/install.sh -o /tmp/pulumi-install.sh; \
-    HOME=/tmp/pulhome sh /tmp/pulumi-install.sh --version "${PULUMI_VERSION}"; \
-    cp -a /tmp/pulhome/.pulumi/bin/. /usr/local/bin/; \
-    rm -rf /tmp/pulumi-install.sh /tmp/pulhome
+    mkdir -p /opt/bin; \
+    curl -fsSL "https://get.pulumi.com/releases/sdk/pulumi-v${PULUMI_VERSION}-linux-x64.tar.gz" \
+    | tar -xz -C /opt/bin --strip-components=1
 
-# renovate: datasource=github-releases depName=astral-sh/uv
-ARG UV_VERSION=0.13.0
+# Upstream uv image: binaries only, nothing to build.
+FROM ghcr.io/astral-sh/uv:${UV_VERSION} AS uv
+
+FROM ghcr.io/getpaseo/paseo:${PASEO_BASE_TAG} AS final
+USER root
+ENV PULUMI_SKIP_UPDATE_CHECK=true
 RUN set -eux; \
-    curl -LsSf "https://astral.sh/uv/${UV_VERSION}/install.sh" | env UV_INSTALL_DIR=/usr/local/bin sh; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends python3 jq ca-certificates unzip tar; \
+    rm -rf /var/lib/apt/lists/*
+COPY --from=cline /opt/cline /opt/cline
+COPY --from=pulumi /opt/bin/ /usr/local/bin/
+COPY --from=uv /uv /uvx /usr/local/bin/
+RUN set -eux; \
+    ln -s /opt/cline/bin/cline /usr/local/bin/cline; \
+    test -x /usr/local/bin/cline; \
     python3 --version; jq --version; pulumi version; uv --version
 
 COPY plugins/ /opt/
