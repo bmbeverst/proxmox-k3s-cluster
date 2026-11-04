@@ -187,9 +187,9 @@ kured = k8s.helm.v3.Release(
                 # Reboot only if Flatcar update pending AND DRBD healthy.
                 "reboot-sentinel-command": (
                     "sh -c 'test -f /var/run/reboot-required -o -f /sentinel/reboot-required"
-                    " && P=$(pgrep -f core.Satellite | head -1) && [ -n \"$P\" ]"
+                    ' && P=$(pgrep -f core.Satellite | head -1) && [ -n "$P" ]'
                     " && O=$(nsenter -m/proc/$P/ns/mnt -n/proc/$P/ns/net -- /usr/sbin/drbdadm status 2>/dev/null)"
-                    " && ! printf %s \"$O\" | grep -qE \"connection:(StandAlone|Connecting|Disconnecting|WFConnection)"
+                    ' && ! printf %s "$O" | grep -qE "connection:(StandAlone|Connecting|Disconnecting|WFConnection)'
                     "|disk:(Inconsistent|Outdated)|suspended:quorum\"'"
                 ),
             },

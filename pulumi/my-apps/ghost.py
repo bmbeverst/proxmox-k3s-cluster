@@ -23,6 +23,7 @@ NAMESPACE = "ghost"
 GHOST_LB_IP = "10.10.1.90"
 GHOST_URL = f"http://{GHOST_LB_IP}"
 
+
 def register(namespace):
     """Create workload, PVC, LB Service."""
 
