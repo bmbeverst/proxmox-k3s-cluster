@@ -10,7 +10,6 @@ check:vints-mods:
         - pulumi/my-apps/containers/server/vintagestory-version.yaml
         - pulumi/my-apps/containers/server/entrypoints/**
         - renovate.json
-        - .gitlab/ci/vints-server.yml
     - when: never
   script:
     # Image ships curl+unzip; only jq missing.
