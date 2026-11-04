@@ -41,12 +41,12 @@
       "allowedVersions": "/^\\d+\\.\\d+\\.\\d+-alpine$/"
     },
     {
-      "description": "Cline: weekly (ships daily upstream); keeps buildcache warm",
+      "description": "Cline: weekly bumps (daily upstream); keeps buildcache warm",
       "matchDepNames": [
         "cline"
       ],
       "schedule": [
-        "weekly"
+        "0 1 * * 1"
       ]
     },
     {
