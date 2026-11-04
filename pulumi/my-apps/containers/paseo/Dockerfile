@@ -3,28 +3,32 @@ ARG PASEO_BASE_TAG=0.11.2
 FROM ghcr.io/getpaseo/paseo:${PASEO_BASE_TAG}
 
 USER root
-# renovate: datasource=npm depName=cline
-ARG CLINE_VERSION=3.0.61
-# renovate: datasource=github-releases depName=pulumi/pulumi
-ARG PULUMI_VERSION=3.261.0
-# renovate: datasource=github-releases depName=astral-sh/uv
-ARG UV_VERSION=0.13.0
-ENV PULUMI_SKIP_UPDATE_CHECK=true
-
-# One layer: each podman RUN commit costs minutes.
+# One layer per tool, least-frequently-updated first (Renovate cadence):
+# a bump invalidates only its own layer and everything after it.
 RUN set -eux; \
-    export npm_config_cache=/tmp/npmcache; \
     apt-get update; \
     apt-get install -y --no-install-recommends python3 jq ca-certificates unzip tar; \
-    rm -rf /var/lib/apt/lists/*; \
-    npm install -g "cline@${CLINE_VERSION}"; \
-    rm -rf /tmp/npmcache; \
+    rm -rf /var/lib/apt/lists/*
+
+# renovate: datasource=npm depName=cline
+ARG CLINE_VERSION=3.0.61
+RUN set -eux; \
+    npm_config_cache=/tmp/npmcache npm install -g "cline@${CLINE_VERSION}"; \
+    rm -rf /tmp/npmcache
+
+# renovate: datasource=github-releases depName=pulumi/pulumi
+ARG PULUMI_VERSION=3.261.0
+ENV PULUMI_SKIP_UPDATE_CHECK=true
+RUN set -eux; \
     curl -fsSL https://get.pulumi.com/install.sh -o /tmp/pulumi-install.sh; \
     HOME=/tmp/pulhome sh /tmp/pulumi-install.sh --version "${PULUMI_VERSION}"; \
     cp -a /tmp/pulhome/.pulumi/bin/. /usr/local/bin/; \
-    rm -rf /tmp/pulumi-install.sh /tmp/pulhome; \
+    rm -rf /tmp/pulumi-install.sh /tmp/pulhome
+
+# renovate: datasource=github-releases depName=astral-sh/uv
+ARG UV_VERSION=0.13.0
+RUN set -eux; \
     curl -LsSf "https://astral.sh/uv/${UV_VERSION}/install.sh" | env UV_INSTALL_DIR=/usr/local/bin sh; \
-    rm -rf /tmp/npmcache; \
     python3 --version; jq --version; pulumi version; uv --version
 
 COPY plugins/ /opt/

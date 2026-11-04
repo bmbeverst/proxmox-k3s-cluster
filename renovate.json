@@ -41,6 +41,15 @@
       "allowedVersions": "/^\\d+\\.\\d+\\.\\d+-alpine$/"
     },
     {
+      "description": "Cline: weekly (ships daily upstream); keeps buildcache warm",
+      "matchDepNames": [
+        "cline"
+      ],
+      "schedule": [
+        "weekly"
+      ]
+    },
+    {
       "description": "Piraeus chart: GitHub releases carry the timestamps the OCI registry lacks",
       "matchManagers": [
         "helmv3"
