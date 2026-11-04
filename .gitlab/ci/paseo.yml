@@ -28,7 +28,6 @@ build:paseo:
     - if: $CI_PIPELINE_SOURCE == "push"
       changes:
         - pulumi/my-apps/containers/paseo/**
-        - pulumi/versions.yaml
         - .gitlab/ci/paseo.yml
     - when: never
 

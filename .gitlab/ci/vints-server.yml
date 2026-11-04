@@ -112,7 +112,6 @@ bake:vints-mods:
         - pulumi/my-apps/containers/server/vintagestory-version.yaml
         - pulumi/my-apps/containers/server/entrypoints/**
         - pulumi/my-apps/containers/mods/**
-        - renovate.json
         - .gitlab/ci/vints-server.yml
     - when: never
   script:
