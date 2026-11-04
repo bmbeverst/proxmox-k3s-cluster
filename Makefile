@@ -9,9 +9,12 @@ PY := uv run --only-group lint
 
 # One-time per clone. pre-commit writes .git/hooks/pre-commit itself, so unlike a
 # core.hooksPath setup there is nothing of ours to keep in sync - but it is still
-# local state, so a fresh clone needs this once.
+# local state, so a fresh clone needs this once. The pre-push hook is what keeps
+# CI lint weekly instead of per-push: the same checks run locally over the
+# commits being pushed, before anything reaches the runner.
 hooks:
 	$(PY) pre-commit install
+	$(PY) pre-commit install --hook-type pre-push
 	@echo "pre-commit hook installed; run 'make lint' any time"
 
 # Apply the hooks to every file, not just the staged ones. Hooks fix files in

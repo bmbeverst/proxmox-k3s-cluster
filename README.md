@@ -17,7 +17,7 @@ Formatting is black + isort, configured in `pyproject.toml` (`[tool.isort]` uses
 Git hooks are local state, so enable them once per clone:
 
 ```bash
-make hooks       # uv run --only-group lint pre-commit install
+make hooks       # installs the pre-commit AND pre-push hooks
 ```
 
 ```bash
@@ -31,8 +31,8 @@ your working tree, so unrelated edits in progress are stashed and restored.
 
 The hook definitions use `repo: local` with the tools from the `lint` group in
 `pyproject.toml`/`uv.lock`, so there is no second `rev:` pin to keep in sync.
-CI (`.gitlab-ci.yml`) runs the same `pre-commit run --all-files`, so a clone
-without hooks still cannot merge unformatted code.
+CI (`.gitlab-ci.yml`) runs the same `pre-commit run --all-files`, but only on
+the weekly schedule — pushes are guarded by the local pre-push hook instead.
 
 ## Components
 
