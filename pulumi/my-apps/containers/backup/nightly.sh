@@ -1,5 +1,5 @@
 #!/usr/bin/env sh
-# Stop the server, back up, restart.
+# Stop server, back up world, restart.
 set -euo pipefail
 
 NAMESPACE="${NAMESPACE:-vintagestory}"

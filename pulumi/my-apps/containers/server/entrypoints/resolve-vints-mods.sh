@@ -1,5 +1,10 @@
 #!/usr/bin/env bash
-# Resolves mod pins into $DATA_PATH/Mods from a PVC depot.
+# Resolve vints mod pins into $DATA_PATH/Mods from a content-addressed PVC depot.
+# Pins file: one "<key>: <version|url>" line per mod.
+#   --check   --mods <pins>                  verify + stage the set (CI)
+#   --promote --mods <pins>                  rewrite URL pins in place (idempotent)
+#   --stage   --mods <pins> [--data-path <p>] [--seed <dir>]
+# $VS_VERSION fixes the game minor. Unresolvable pins are fatal.
 set -euo pipefail
 
 API="https://mods.vintagestory.at/api/mod"

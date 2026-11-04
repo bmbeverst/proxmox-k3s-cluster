@@ -1,8 +1,6 @@
 #!/bin/sh
-# Register cloned repos: project plus workspace per repo.
-#
+# Register cloned repos: project + workspace per repo.
 # postStart hook: always exit 0; non-zero kills the container.
-#
 # Additive only: existing projects and workspaces are never touched.
 set -u
 

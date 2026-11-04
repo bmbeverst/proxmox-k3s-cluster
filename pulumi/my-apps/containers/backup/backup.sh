@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Tar world + config to NFS; keep 7 newest.
+# Tar world + config to the NFS share; keep 7 newest.
+# Restore: tar -xzf saves-<ts>.tar.gz -C /data
 set -euo pipefail
 
 DATA_PATH="${DATA_PATH:-/data}"

@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-# Runs the server (PID 1); --stratum-skip-bootstrap keeps starts offline.
+# Run the Vintage Story server (PID 1) so Kubernetes owns lifecycle/logs.
+# Stratum fork; --stratum-skip-bootstrap starts offline (install built in).
+# Other flags pass through to the vanilla server core.
 set -euo pipefail
 cd /serverfiles
 

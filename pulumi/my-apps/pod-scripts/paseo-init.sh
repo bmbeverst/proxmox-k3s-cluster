@@ -1,8 +1,6 @@
 #!/bin/sh
 # Init container: chown PVCs, clone PASEO_REPOS into PASEO_WORKSPACE.
-#
 # Manifest-carried: paseo.py reads this from git, no rebuild.
-#
 # Idempotent, non-destructive: failures are logged, never fatal.
 set -eux
 

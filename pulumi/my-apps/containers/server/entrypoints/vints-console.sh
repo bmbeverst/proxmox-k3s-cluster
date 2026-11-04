@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
-# Console client: commands via $CONSOLE_FIFO, replies from the log.
+# Console client for the running server.
+#   vints-console                interactive: follow log, type commands
+#   vints-console /list clients  one-shot: send, print reply
+# Commands go to $CONSOLE_FIFO; replies read from the server log.
 set -euo pipefail
 
 # CONSOLE_FIFO default keeps CI smoke tests working.
