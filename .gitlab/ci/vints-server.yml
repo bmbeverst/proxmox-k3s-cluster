@@ -100,7 +100,6 @@ build:vints:
         - pulumi/my-apps/containers/server/Dockerfile
         - pulumi/my-apps/containers/server/entrypoints/**
         - pulumi/my-apps/containers/server/vintagestory-version.yaml
-        - .gitlab/ci/vints-server.yml
     - when: never
 
 
@@ -115,7 +114,6 @@ bake:vints-mods:
         - pulumi/my-apps/containers/server/vintagestory-version.yaml
         - pulumi/my-apps/containers/server/entrypoints/**
         - pulumi/my-apps/containers/mods/**
-        - .gitlab/ci/vints-server.yml
     - when: never
   script:
     # Image ships curl+unzip; only jq missing.
@@ -243,7 +241,6 @@ container_scanning:vints:
     - if: $CI_PIPELINE_SOURCE == "push"
       changes:
         - pulumi/my-apps/containers/server/**
-        - .gitlab/ci/vints-server.yml
     - when: never
 
 # Smoke tests: boot each image, assert it starts.
@@ -254,7 +251,6 @@ smoke:vints:
     - if: $CI_PIPELINE_SOURCE == "push"
       changes:
         - pulumi/my-apps/containers/server/**
-        - .gitlab/ci/vints-server.yml
     - when: never
   script:
     - podman login -u "$CI_REGISTRY_USER" -p "$CI_REGISTRY_PASSWORD" "$CI_REGISTRY"

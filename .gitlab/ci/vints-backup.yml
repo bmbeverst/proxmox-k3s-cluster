@@ -45,7 +45,6 @@ build:vints-backup:
     - if: $CI_PIPELINE_SOURCE == "push"
       changes:
         - pulumi/my-apps/containers/backup/**
-        - .gitlab/ci/vints-backup.yml
     - when: never
 
 
@@ -59,7 +58,6 @@ container_scanning:vints-backup:
     - if: $CI_PIPELINE_SOURCE == "push"
       changes:
         - pulumi/my-apps/containers/backup/**
-        - .gitlab/ci/vints-backup.yml
     - when: never
 
 smoke:vints-backup:
@@ -69,7 +67,6 @@ smoke:vints-backup:
     - if: $CI_PIPELINE_SOURCE == "push"
       changes:
         - pulumi/my-apps/containers/backup/**
-        - .gitlab/ci/vints-backup.yml
     - when: never
   script:
     - podman login -u "$CI_REGISTRY_USER" -p "$CI_REGISTRY_PASSWORD" "$CI_REGISTRY"
