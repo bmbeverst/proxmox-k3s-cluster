@@ -50,7 +50,7 @@ build:vints:
   stage: build
   image: quay.io/containers/buildah:v1.43.4-immutable
   # "max patch + 1" serialises tag computation.
-  resource_group: build-vints-server
+  resource_group: image-builds
   script:
     - |
       set -euo pipefail
@@ -118,7 +118,8 @@ build:vints:
 build:vints-backup:
   stage: build
   image: quay.io/containers/buildah:v1.43.4-immutable
-  resource_group: build-vints-backup
+  # Shared group: parallel vfs builds exhausted the runner's disk.
+  resource_group: image-builds
   script:
     - |
       set -euo pipefail
@@ -166,7 +167,8 @@ build:vints-backup:
 build:paseo:
   stage: build
   image: quay.io/containers/buildah:v1.43.4-immutable
-  resource_group: build-paseo
+  # Shared group: parallel vfs builds exhausted the runner's disk.
+  resource_group: image-builds
   script:
     - |
       set -euo pipefail
@@ -175,9 +177,13 @@ build:paseo:
       printf '%s' "$TAG" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' \
         || { echo "FATAL: paseo_image_tag in pulumi/versions.yaml is not X.Y.Z"; exit 1; }
       echo "Building $REPO:$TAG"
+      # Registry-backed build cache: reuse unchanged layers between runs.
+      buildah login -u "$CI_REGISTRY_USER" -p "$CI_REGISTRY_PASSWORD" "$CI_REGISTRY"
       # --layers dedupes; --format docker keeps HEALTHCHECK
       buildah build --layers --storage-driver=vfs --isolation=chroot \
         --format docker \
+        --cache-from "$CI_REGISTRY_IMAGE/paseo/buildcache" \
+        --cache-to "$CI_REGISTRY_IMAGE/paseo/buildcache" \
         --tag "$REPO:$TAG" \
         pulumi/my-apps/containers/paseo
       buildah push --storage-driver=vfs \
