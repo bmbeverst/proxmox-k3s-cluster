@@ -18,16 +18,86 @@
       "automerge": false
     },
     {
-      "description": "One MR for everything except Helm chart bumps and the versions.yaml deploy pins (those stay one-at-a-time)",
+      "description": "Group non-critical cluster deps into one block: docker deploy pins, selected helm charts, and suc",
+      "matchDatasources": [
+        "docker"
+      ],
+      "matchDepNames": [
+        "registry.gitlab.com/proxmox-k3s/proxmox-k3s-cluster/vints-server",
+        "registry.gitlab.com/proxmox-k3s/proxmox-k3s-cluster/vints-backup",
+        "registry.gitlab.com/proxmox-k3s/proxmox-k3s-cluster/paseo",
+        "ghcr.io/donkie/spoolman",
+        "pulumi/pulumi-python",
+        "ghcr.io/favonia/cloudflare-ddns",
+        "mcr.microsoft.com/dotnet/runtime",
+        "ghost"
+      ],
+      "groupName": "non-critical cluster deps",
+      "groupSlug": "non-critical-cluster-deps",
+      "priority": 999
+    },
+    {
+      "description": "Group non-critical helm chart bumps into one block",
       "matchManagers": [
-        "!helmv3"
+        "helmv3"
       ],
-      "matchFileNames": [
-        "!pulumi/Chart.yaml",
-        "!pulumi/versions.yaml"
+      "matchDepNames": [
+        "kube-state-metrics",
+        "victoria-metrics-single",
+        "kured",
+        "cert-manager",
+        "reloader"
       ],
-      "groupName": "all dependencies",
-      "groupSlug": "all-deps"
+      "groupName": "non-critical cluster deps",
+      "groupSlug": "non-critical-cluster-deps",
+      "priority": 999
+    },
+    {
+      "description": "Group system-upgrade-controller (github-releases) into the non-critical block",
+      "matchDatasources": [
+        "github-releases"
+      ],
+      "matchDepNames": [
+        "rancher/system-upgrade-controller"
+      ],
+      "groupName": "non-critical cluster deps",
+      "groupSlug": "non-critical-cluster-deps",
+      "priority": 999
+    },
+    {
+      "description": "StratumServer/Stratum: auto-update into the non-critical block, no stable-only filter, sha256 refreshed by hand on version change",
+      "matchDatasources": [
+        "github-releases"
+      ],
+      "matchDepNames": [
+        "StratumServer/Stratum"
+      ],
+      "groupName": "non-critical cluster deps",
+      "groupSlug": "non-critical-cluster-deps",
+      "minimumReleaseAge": null,
+      "priority": 999
+    },
+    {
+      "description": "Big merge set: vintagestory game",
+      "matchDatasources": [
+        "custom.custom-vintagestory"
+      ],
+      "matchDepNames": [
+        "vintagestory"
+      ],
+      "groupName": "non-critical cluster deps",
+      "groupSlug": "non-critical-cluster-deps",
+      "priority": 999
+    },
+    {
+      "description": "Big merge set: vints mods",
+      "matchDatasources": [
+        "custom.vintagestory_mods"
+      ],
+      "groupName": "non-critical cluster deps",
+      "groupSlug": "non-critical-cluster-deps",
+      "priority": 999,
+      "minimumReleaseAge": null
     },
     {
       "description": "Ghost image: keep the -alpine suffix",
@@ -38,7 +108,10 @@
         "ghost"
       ],
       "versioning": "docker",
-      "allowedVersions": "/^\\d+\\.\\d+\\.\\d+-alpine$/"
+      "allowedVersions": "/^\\d+\\.\\d+\\.\\d+-alpine$/",
+      "groupName": "non-critical cluster deps",
+      "groupSlug": "non-critical-cluster-deps",
+      "priority": 999
     },
     {
       "description": "Cline: weekly bumps (daily upstream); keeps buildcache warm",
@@ -47,45 +120,10 @@
       ],
       "schedule": [
         "0 1 * * 1"
-      ]
-    },
-    {
-      "description": "Piraeus chart: GitHub releases carry the timestamps the OCI registry lacks",
-      "matchManagers": [
-        "helmv3"
       ],
-      "matchDatasources": [
-        "docker"
-      ],
-      "matchDepNames": [
-        "piraeus"
-      ],
-      "matchFileNames": [
-        "pulumi/Chart.yaml"
-      ],
-      "overrideDatasource": "github-releases",
-      "overridePackageName": "piraeusdatastore/piraeus-operator",
-      "extractVersion": "^v(?<version>\\d+\\.\\d+\\.\\d+)$",
-      "versioning": "helm"
-    },
-    {
-      "description": "linstor-cluster chart: GitHub releases carry the timestamps the OCI registry lacks",
-      "matchManagers": [
-        "helmv3"
-      ],
-      "matchDatasources": [
-        "docker"
-      ],
-      "matchDepNames": [
-        "linstor-cluster"
-      ],
-      "matchFileNames": [
-        "pulumi/Chart.yaml"
-      ],
-      "overrideDatasource": "github-releases",
-      "overridePackageName": "piraeusdatastore/helm-charts",
-      "extractVersion": "^linstor-cluster-(?<version>\\d+\\.\\d+\\.\\d+)$",
-      "versioning": "helm"
+      "groupName": "non-critical cluster deps",
+      "groupSlug": "non-critical-cluster-deps",
+      "priority": 999
     },
     {
       "description": "pyproject floors: bump the >= lower bounds",
@@ -95,7 +133,10 @@
       "matchDatasources": [
         "pypi"
       ],
-      "rangeStrategy": "bump"
+      "rangeStrategy": "bump",
+      "groupName": "non-critical cluster deps",
+      "groupSlug": "non-critical-cluster-deps",
+      "priority": 999
     },
     {
       "description": "PKO chart: NEVER merge - merging makes PKO upgrade itself and wedge the Helm release",
@@ -118,33 +159,58 @@
       ],
       "commitMessagePrefix": "DO NOT MERGE -",
       "commitMessageAction": "",
-      "commitMessageTopic": "PKO chart {{{newVersion}}}:",
+      "commitMessageTopic": "PKO chart newVersion phase",
       "commitMessageExtra": "",
-      "commitMessageSuffix": "apply by hand with pulumi up",
+      "commitMessageSuffix": "apply by hand with pulumi",
       "prBodyNotes": [
         "# DO NOT MERGE",
-        "Merging this bump makes PKO upgrade its own chart, and that upgrade replaces the operator running it: the Helm release is cancelled mid-flight and left `pending-rollback`, after which every Helm operation fails with \"another operation (install/upgrade/rollback) is in progress\".",
-        "Apply it by hand from the dev box instead, then close this MR: `cd pulumi/infra-bootstrap && pulumi up --yes`"
+        "Merging this bump makes PKO upgrade its own chart, and that upgrade replaces the operator running it: the Helm release is cancelled mid-flight and left pending-rollback, after which every Helm operation fails with another operation (install/upgrade/rollback) is in progress",
+        "Apply it by hand from the dev box instead, then close this MR: cd pulumi/infra-bootstrap pulumi up"
       ]
     },
     {
-      "description": "Mods: no release-age cooldown - the boot smoke is the gate",
-      "matchDatasources": [
-        "custom.vintagestory_mod_1_22"
+      "description": "Piraeus chart: GitHub releases carry the timestamps the OCI registry lacks",
+      "matchManagers": [
+        "helmv3"
       ],
-      "minimumReleaseAge": null
-    },
-    {
-      "description": "Stratum: stable 'stratum.<n>' releases only (never -indev), its own MR, never automerged - the sha256 pin beside it has to be refreshed by hand",
       "matchDatasources": [
-        "github-releases"
+        "docker"
       ],
       "matchDepNames": [
-        "StratumServer/Stratum"
+        "piraeus"
       ],
-      "allowedVersions": "/^\\d+\\.\\d+\\.\\d+-stratum\\.\\d+$/",
-      "groupName": null,
-      "automerge": false
+      "matchFileNames": [
+        "pulumi/Chart.yaml"
+      ],
+      "overrideDatasource": "github-releases",
+      "overridePackageName": "piraeusdatastore/piraeus-operator",
+      "extractVersion": "^v(?<version>\\d+\\.\\d+\\.\\d+)$",
+      "versioning": "helm",
+      "groupName": "non-critical cluster deps",
+      "groupSlug": "non-critical-cluster-deps",
+      "priority": 999
+    },
+    {
+      "description": "linstor-cluster chart: GitHub releases carry the timestamps the OCI registry lacks",
+      "matchManagers": [
+        "helmv3"
+      ],
+      "matchDatasources": [
+        "docker"
+      ],
+      "matchDepNames": [
+        "linstor-cluster"
+      ],
+      "matchFileNames": [
+        "pulumi/Chart.yaml"
+      ],
+      "overrideDatasource": "github-releases",
+      "overridePackageName": "piraeusdatastore/helm-charts",
+      "extractVersion": "^linstor-cluster-(?<version>\\d+\\.\\d+\\.\\d+)$",
+      "versioning": "helm",
+      "groupName": "non-critical cluster deps",
+      "groupSlug": "non-critical-cluster-deps",
+      "priority": 999
     }
   ],
   "customManagers": [
@@ -158,7 +224,7 @@
         "(?:^|\\n)(?<depName>[A-Za-z0-9_.-]+):[ \\t]*\"?(?<currentValue>[0-9]+\\.[0-9]+[^\\s\"#]*)"
       ],
       "autoReplaceStringTemplate": "\n{{{depName}}}: {{{newValue}}}",
-      "datasourceTemplate": "custom.vintagestory_mod_1_22",
+      "datasourceTemplate": "custom.vintagestory_mods",
       "versioningTemplate": "semver-coerced"
     },
     {
@@ -183,7 +249,7 @@
         "{\"releases\": $map($keys($), function($v) {({\"version\": $v})})}"
       ]
     },
-    "vintagestory_mod_1_22": {
+    "vintagestory_mods": {
       "format": "json",
       "defaultRegistryUrlTemplate": "https://mods.vintagestory.at/api/mod/{{{packageName}}}",
       "transformTemplates": [
