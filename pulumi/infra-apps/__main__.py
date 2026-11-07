@@ -106,6 +106,7 @@ server_plan = CustomResource(
     spec={
         "concurrency": 1,
         "cordon": True,
+        "postCompleteDelay": "300s",
         # Drain pods before k3s restart.
         "drain": {
             # Force-delete pods on drain.
@@ -144,6 +145,7 @@ agent_plan = CustomResource(
         # Agent plan: worker nodes only.
         "concurrency": 1,
         "cordon": True,
+        "postCompleteDelay": "300s",
         "drain": {
             "force": True,
             "disableEviction": True,
