@@ -10,7 +10,8 @@ for URL in $PASEO_REPOS; do
   repo="$PASEO_WORKSPACE/${URL##*/}"
   repo="${repo%.git}"
   if [ -d "$repo/.git" ]; then
-    git -C "$repo" fetch --prune origin || echo "ERROR: git fetch failed in $repo" >&2
+    # Existing checkout: skip the network round-trip, it dominates a cold start.
+    echo "INFO: $repo already cloned; skipping fetch" >&2
   else
     git clone "$URL" "$repo" || echo "ERROR: git clone failed for $repo" >&2
   fi

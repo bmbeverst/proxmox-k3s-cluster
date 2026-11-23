@@ -3,6 +3,7 @@
 - Image from `containers/paseo/`, pinned in `versions.yaml`.
 - Init runs `pod-scripts/paseo-init.sh` from repo.
 - `paseo-home`: state, credentials. `paseo-workspace`: repos.
+- Scales to zero via the KEDA HTTP add-on; the LB VIP fronts its interceptor.
 - Secrets: paseoPassword, paseoClineProviders, paseoGitToken, pulumiAccessToken.
 """
 
@@ -14,6 +15,7 @@ import pulumi
 import pulumi_kubernetes as k8s
 import pulumi_kubernetes.rbac as k8s_rbac  # read-only ClusterRole for in-cluster `pulumi preview`
 import yaml
+from pulumi_kubernetes.apiextensions import CustomResource
 from pulumi_kubernetes.meta.v1 import ObjectMetaArgs
 
 with open(os.path.join(os.path.dirname(__file__), "..", "versions.yaml")) as f:
@@ -26,8 +28,21 @@ PASEO_REGISTRY_IMAGE_ROOT = f"{PASEO_REGISTRY}/proxmox-k3s/proxmox-k3s-cluster"
 PASEO_IMAGE = f"{PASEO_REGISTRY_IMAGE_ROOT}/paseo:{_versions['paseo_image_tag']}"
 
 PASEO_PORT = 6767
-# kube-vip LB VIP.
+# kube-vip LB VIP: fronts the KEDA interceptor, not paseo itself.
 PASEO_LB_IP = "10.10.1.62"
+PASEO_HOST = "paseo.lenatin.org"
+
+# KEDA HTTP add-on (installed by infra-apps).
+KEDA_NAMESPACE = "keda"
+INTERCEPTOR_SERVICE = "keda-add-ons-http-interceptor-proxy"
+INTERCEPTOR_PORT = 8080
+# Chart-stable interceptor pod labels.
+INTERCEPTOR_SELECTOR = {
+    "app.kubernetes.io/component": "interceptor",
+    "app.kubernetes.io/name": "http-add-on",
+}
+# Idle time before the pod is removed: one hour.
+PASEO_SCALEDOWN_SECONDS = 3600
 
 # Repos cloned into workspace PVC.
 PASEO_REPOS = [
@@ -111,6 +126,15 @@ with open(os.path.join(_POD_SCRIPTS, "paseo-init.sh")) as f:
 # PostStart: registers repos.
 with open(os.path.join(_POD_SCRIPTS, "paseo-register-projects.sh")) as f:
     PASEO_REGISTER_SCRIPT = f.read()
+
+
+def _paseo_route():
+    "Hostname route at the interceptor."
+    return {
+        "match": f"Host(`{PASEO_HOST}`)",
+        "kind": "Rule",
+        "services": [{"name": INTERCEPTOR_SERVICE, "port": INTERCEPTOR_PORT}],
+    }
 
 
 def register(namespace):
@@ -306,6 +330,8 @@ def register(namespace):
                                     "name": "CLINE_PROVIDERS_SEED",
                                     "value": PASEO_CLINE_SEED_PATH,
                                 },
+                                # DNS-rebinding guard: the hostname route is not a default.
+                                {"name": "PASEO_ALLOWED_HOSTS", "value": PASEO_HOST},
                                 {"name": "GIT_AUTHOR_NAME", "value": "paseo"},
                                 {
                                     "name": "GIT_AUTHOR_EMAIL",
@@ -440,19 +466,20 @@ def register(namespace):
                 paseo_sa,
             ],
             ignore_changes=[
+                # KEDA owns the replica count now (scale to zero).
+                "spec.replicas",
                 'spec.template.metadata.annotations["reloader.stakater.com/last-reloaded-from"]',
             ],
         ),
     )
 
-    # LB for web UI + API.
+    # ClusterIP: the interceptor is the only thing that talks to paseo.
     paseo_service = k8s.core.v1.Service(
         "paseo",
         metadata=ObjectMetaArgs(name="paseo", namespace=NAMESPACE),
         spec=k8s.core.v1.ServiceSpecArgs(
             selector={"app": "paseo"},
-            type="LoadBalancer",
-            load_balancer_ip=PASEO_LB_IP,
+            type="ClusterIP",
             ports=[
                 k8s.core.v1.ServicePortArgs(
                     name="http",
@@ -462,4 +489,138 @@ def register(namespace):
             ],
         ),
         opts=pulumi.ResourceOptions(depends_on=[namespace, paseo]),
+    )
+
+    # The VIP now lands on the interceptor, which wakes paseo on the first request.
+    paseo_vip = k8s.core.v1.Service(
+        "paseo-interceptor",
+        metadata=ObjectMetaArgs(name="paseo-interceptor", namespace=KEDA_NAMESPACE),
+        spec=k8s.core.v1.ServiceSpecArgs(
+            selector=INTERCEPTOR_SELECTOR,
+            type="LoadBalancer",
+            load_balancer_ip=PASEO_LB_IP,
+            ports=[
+                k8s.core.v1.ServicePortArgs(
+                    name="http",
+                    port=PASEO_PORT,
+                    target_port="proxy",
+                    protocol="TCP",
+                ),
+            ],
+        ),
+        opts=pulumi.ResourceOptions(depends_on=[paseo_service]),
+    )
+
+    # Which hosts/paths wake paseo; health checks answer without waking it.
+    paseo_route = CustomResource(
+        "paseo-interceptor-route",
+        api_version="http.keda.sh/v1beta1",
+        kind="InterceptorRoute",
+        metadata=ObjectMetaArgs(name="paseo", namespace=NAMESPACE),
+        spec={
+            "target": {"service": "paseo", "port": PASEO_PORT},
+            "rules": [
+                # Bare VIP: match any Host.
+                {"paths": [{"value": "/"}]},
+                # Hostname via Traefik.
+                {"hosts": [PASEO_HOST], "paths": [{"value": "/"}]},
+            ],
+            "scalingMetric": {"concurrency": {"targetValue": 10}},
+            # No request deadline: the UI holds long-lived streams.
+            "timeouts": {
+                "readiness": "120s",
+                "request": "0s",
+                "responseHeader": "30s",
+            },
+            "staticRoutes": [
+                {
+                    "rules": [{"paths": [{"value": "/api/health"}]}],
+                    "response": {"statusCode": 200, "body": "OK"},
+                }
+            ],
+        },
+        opts=pulumi.ResourceOptions(depends_on=[namespace, paseo]),
+    )
+
+    # Request-driven scaling: 0 replicas after an hour idle.
+    paseo_scaledobject = CustomResource(
+        "paseo-scaledobject",
+        api_version="keda.sh/v1alpha1",
+        kind="ScaledObject",
+        metadata=ObjectMetaArgs(name="paseo", namespace=NAMESPACE),
+        spec={
+            "minReplicaCount": 0,
+            # RWO PVCs: never two pods.
+            "maxReplicaCount": 1,
+            "cooldownPeriod": PASEO_SCALEDOWN_SECONDS,
+            "pollingInterval": 15,
+            "scaleTargetRef": {
+                "apiVersion": "apps/v1",
+                "kind": "Deployment",
+                "name": "paseo",
+            },
+            "triggers": [
+                {
+                    "type": "external-push",
+                    "metadata": {
+                        "scalerAddress": "keda-add-ons-http-external-scaler.keda:9090",
+                        "interceptorRoute": "paseo",
+                    },
+                }
+            ],
+        },
+        opts=pulumi.ResourceOptions(depends_on=[namespace, paseo, paseo_route]),
+    )
+
+    # Plain http redirects to https on the hostname.
+    paseo_redirect = CustomResource(
+        "paseo-https-redirect",
+        api_version="traefik.io/v1alpha1",
+        kind="Middleware",
+        metadata=ObjectMetaArgs(name="paseo-https-redirect", namespace=KEDA_NAMESPACE),
+        spec={"redirectScheme": {"scheme": "https", "permanent": True}},
+        opts=pulumi.ResourceOptions(depends_on=[paseo_vip]),
+    )
+
+    # The cluster default TLSOption requires a Cloudflare origin-pull client cert,
+    # which would break LAN/Tailscale clients once http redirects to https.
+    paseo_tls = CustomResource(
+        "paseo-tls-option",
+        api_version="traefik.io/v1alpha1",
+        kind="TLSOption",
+        metadata=ObjectMetaArgs(name="paseo", namespace=KEDA_NAMESPACE),
+        spec={"minVersion": "VersionTLS12"},
+        opts=pulumi.ResourceOptions(depends_on=[paseo_vip]),
+    )
+
+    # Hostname path. Traefik forbids cross-namespace service refs, so this lives in `keda`.
+    # One IngressRoute per entrypoint: redirect on `web`, serve on `websecure`.
+    paseo_ingress_web = CustomResource(
+        "paseo-ingressroute-web",
+        api_version="traefik.io/v1alpha1",
+        kind="IngressRoute",
+        metadata=ObjectMetaArgs(name="paseo-web", namespace=KEDA_NAMESPACE),
+        spec={
+            "entryPoints": ["web"],
+            "routes": [
+                {
+                    **_paseo_route(),
+                    "middlewares": [{"name": "paseo-https-redirect"}],
+                }
+            ],
+        },
+        opts=pulumi.ResourceOptions(depends_on=[paseo_redirect]),
+    )
+
+    paseo_ingress = CustomResource(
+        "paseo-ingressroute",
+        api_version="traefik.io/v1alpha1",
+        kind="IngressRoute",
+        metadata=ObjectMetaArgs(name="paseo", namespace=KEDA_NAMESPACE),
+        spec={
+            "entryPoints": ["websecure"],
+            "routes": [_paseo_route()],
+            "tls": {"options": {"name": "paseo"}},
+        },
+        opts=pulumi.ResourceOptions(depends_on=[paseo_tls]),
     )
