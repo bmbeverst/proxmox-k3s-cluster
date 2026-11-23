@@ -33,3 +33,9 @@ dependencies:
   - name: reloader
     repository: https://stakater.github.io/stakater-charts
     version: 2.2.18
+  - name: keda
+    repository: https://kedacore.github.io/charts
+    version: 2.21.1
+  - name: keda-add-ons-http
+    repository: https://kedacore.github.io/charts
+    version: 0.16.0

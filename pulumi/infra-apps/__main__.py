@@ -858,6 +858,73 @@ reloader = k8s.helm.v3.Release(
     ),
 )
 
+# KEDA: event-driven autoscaling, including to/from zero.
+keda = k8s.helm.v3.Release(
+    "keda",
+    k8s.helm.v3.ReleaseArgs(
+        chart="keda",
+        version=_chart_deps["keda"]["version"],
+        namespace="keda",
+        create_namespace=True,
+        repository_opts=k8s.helm.v3.RepositoryOptsArgs(
+            repo=_chart_deps["keda"]["repository"],
+        ),
+        values={
+            "resources": {
+                "operator": {
+                    "requests": {"cpu": "50m", "memory": "100Mi"},
+                    "limits": {"memory": "256Mi"},
+                },
+                "metricServer": {
+                    "requests": {"cpu": "50m", "memory": "100Mi"},
+                    "limits": {"memory": "256Mi"},
+                },
+                "webhooks": {
+                    "requests": {"cpu": "10m", "memory": "64Mi"},
+                    "limits": {"memory": "128Mi"},
+                },
+            },
+        },
+        timeout=600,
+    ),
+)
+
+# KEDA HTTP add-on: request-driven scale-to-zero; the interceptor takes the request.
+keda_http = k8s.helm.v3.Release(
+    "keda-add-ons-http",
+    k8s.helm.v3.ReleaseArgs(
+        chart="keda-add-ons-http",
+        version=_chart_deps["keda-add-ons-http"]["version"],
+        namespace="keda",
+        create_namespace=True,
+        repository_opts=k8s.helm.v3.RepositoryOptsArgs(
+            repo=_chart_deps["keda-add-ons-http"]["repository"],
+        ),
+        values={
+            "operator": {
+                "resources": {
+                    "requests": {"cpu": "10m", "memory": "64Mi"},
+                    "limits": {"memory": "128Mi"},
+                },
+            },
+            "scaler": {
+                "resources": {
+                    "requests": {"cpu": "10m", "memory": "64Mi"},
+                    "limits": {"memory": "128Mi"},
+                },
+            },
+            "interceptor": {
+                "resources": {
+                    "requests": {"cpu": "10m", "memory": "64Mi"},
+                    "limits": {"memory": "192Mi"},
+                },
+            },
+        },
+        timeout=600,
+    ),
+    opts=ResourceOptions(depends_on=[keda]),
+)
+
 # Tailscale operator.
 _tailscale_cfg = pulumi.Config("tailscale")
 

@@ -33,8 +33,7 @@
         "ghost"
       ],
       "groupName": "non-critical cluster deps",
-      "groupSlug": "non-critical-cluster-deps",
-      "priority": 999
+      "groupSlug": "non-critical-cluster-deps"
     },
     {
       "description": "Group non-critical helm chart bumps into one block",
@@ -46,11 +45,12 @@
         "victoria-metrics-single",
         "kured",
         "cert-manager",
-        "reloader"
+        "reloader",
+        "keda",
+        "keda-add-ons-http"
       ],
       "groupName": "non-critical cluster deps",
-      "groupSlug": "non-critical-cluster-deps",
-      "priority": 999
+      "groupSlug": "non-critical-cluster-deps"
     },
     {
       "description": "Group system-upgrade-controller (github-releases) into the non-critical block",
@@ -61,8 +61,7 @@
         "rancher/system-upgrade-controller"
       ],
       "groupName": "non-critical cluster deps",
-      "groupSlug": "non-critical-cluster-deps",
-      "priority": 999
+      "groupSlug": "non-critical-cluster-deps"
     },
     {
       "description": "StratumServer/Stratum: auto-update into the non-critical block, no stable-only filter, sha256 refreshed by hand on version change",
@@ -74,8 +73,7 @@
       ],
       "groupName": "non-critical cluster deps",
       "groupSlug": "non-critical-cluster-deps",
-      "minimumReleaseAge": null,
-      "priority": 999
+      "minimumReleaseAge": null
     },
     {
       "description": "Big merge set: vintagestory game",
@@ -86,8 +84,7 @@
         "vintagestory"
       ],
       "groupName": "non-critical cluster deps",
-      "groupSlug": "non-critical-cluster-deps",
-      "priority": 999
+      "groupSlug": "non-critical-cluster-deps"
     },
     {
       "description": "Big merge set: vints mods",
@@ -96,7 +93,6 @@
       ],
       "groupName": "non-critical cluster deps",
       "groupSlug": "non-critical-cluster-deps",
-      "priority": 999,
       "minimumReleaseAge": null
     },
     {
@@ -110,20 +106,16 @@
       "versioning": "docker",
       "allowedVersions": "/^\\d+\\.\\d+\\.\\d+-alpine$/",
       "groupName": "non-critical cluster deps",
-      "groupSlug": "non-critical-cluster-deps",
-      "priority": 999
+      "groupSlug": "non-critical-cluster-deps"
     },
     {
       "description": "Cline: weekly bumps (daily upstream); keeps buildcache warm",
       "matchDepNames": [
         "cline"
       ],
-      "schedule": [
-        "0 1 * * 1"
-      ],
+      "schedule": [],
       "groupName": "non-critical cluster deps",
-      "groupSlug": "non-critical-cluster-deps",
-      "priority": 999
+      "groupSlug": "non-critical-cluster-deps"
     },
     {
       "description": "pyproject floors: bump the >= lower bounds",
@@ -135,8 +127,7 @@
       ],
       "rangeStrategy": "bump",
       "groupName": "non-critical cluster deps",
-      "groupSlug": "non-critical-cluster-deps",
-      "priority": 999
+      "groupSlug": "non-critical-cluster-deps"
     },
     {
       "description": "PKO chart: NEVER merge - merging makes PKO upgrade itself and wedge the Helm release",
@@ -187,8 +178,7 @@
       "extractVersion": "^v(?<version>\\d+\\.\\d+\\.\\d+)$",
       "versioning": "helm",
       "groupName": "non-critical cluster deps",
-      "groupSlug": "non-critical-cluster-deps",
-      "priority": 999
+      "groupSlug": "non-critical-cluster-deps"
     },
     {
       "description": "linstor-cluster chart: GitHub releases carry the timestamps the OCI registry lacks",
@@ -209,8 +199,7 @@
       "extractVersion": "^linstor-cluster-(?<version>\\d+\\.\\d+\\.\\d+)$",
       "versioning": "helm",
       "groupName": "non-critical cluster deps",
-      "groupSlug": "non-critical-cluster-deps",
-      "priority": 999
+      "groupSlug": "non-critical-cluster-deps"
     }
   ],
   "customManagers": [
