@@ -8,9 +8,10 @@ modules and are registered here (so Pulumi constructs every resource from the
 - `vintagestory.py` -> `vintagestory.register(vints_namespace)`
 - `paseo.py`        -> `paseo.register(paseo_namespace)`
 - `spoolman.py`     -> `spoolman.register(spoolman_namespace)`
+- `homeassistant.py` -> `homeassistant.register(home_assistant_namespace)`
 
 Each app lives in its own Namespace for isolation: `ghost`, `vintagestory`,
-`paseo` and `spoolman`.
+`paseo`, `spoolman` and `home-assistant`.
 
 my-apps does not need to wait on the infrastructure stacks (infra-bootstrap,
 infra-apps) inside this program anymore: that ordering is expressed declaratively
@@ -23,6 +24,7 @@ import pulumi_kubernetes as k8s
 from pulumi_kubernetes.meta.v1 import ObjectMetaArgs
 
 import ghost
+import homeassistant
 import paseo
 import spoolman
 import vintagestory
@@ -44,8 +46,13 @@ spoolman_namespace = k8s.core.v1.Namespace(
     "spoolman",
     metadata=ObjectMetaArgs(name=spoolman.NAMESPACE),
 )
+home_assistant_namespace = k8s.core.v1.Namespace(
+    "home-assistant",
+    metadata=ObjectMetaArgs(name=homeassistant.NAMESPACE),
+)
 
 ghost.register(ghost_namespace)
 vintagestory.register(vints_namespace)
 paseo.register(paseo_namespace)
 spoolman.register(spoolman_namespace)
+homeassistant.register(home_assistant_namespace)

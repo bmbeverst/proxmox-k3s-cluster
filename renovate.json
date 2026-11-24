@@ -30,7 +30,9 @@
         "pulumi/pulumi-python",
         "ghcr.io/favonia/cloudflare-ddns",
         "mcr.microsoft.com/dotnet/runtime",
-        "ghost"
+        "ghost",
+        "homeassistant/home-assistant",
+        "eclipse-mosquitto"
       ],
       "groupName": "non-critical cluster deps",
       "groupSlug": "non-critical-cluster-deps"

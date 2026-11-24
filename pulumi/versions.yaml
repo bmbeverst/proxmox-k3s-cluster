@@ -21,6 +21,12 @@ paseo_image_tag: 0.2.1
 # renovate: datasource=docker depName=ghcr.io/donkie/spoolman
 spoolman_image_tag: 0.27.0
 
+# renovate: datasource=docker depName=homeassistant/home-assistant
+homeassistant_image_tag: 2026.11.3
+
+# renovate: datasource=docker depName=eclipse-mosquitto
+mosquitto_image_tag: 2.1.4-alpine
+
 # renovate: datasource=docker depName=pulumi/pulumi-python
 pko_workspace_image_tag: 3.261.0
 
