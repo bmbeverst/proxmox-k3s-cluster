@@ -2,8 +2,8 @@
 
 - Home Assistant runs one replica on hostNetwork so mDNS discovery (ESPHome,
   HomeKit, Chromecast) works; `Recreate` keeps two pods off the config volume.
-- Mosquitto is a LAN-only broker; its password file is rebuilt from Pulumi
-  secrets at every start, since the upstream image has no env-based auth.
+- Mosquitto is a LAN-only broker; an init container turns the Pulumi-managed
+  Secret into a password file, so the running broker sees only the hash.
 - Both keep state on linstor-r2 PVCs.
 """
 
@@ -19,9 +19,9 @@ with open(os.path.join(os.path.dirname(__file__), "..", "versions.yaml")) as f:
 
 # Read from repo; changes ship via git.
 with open(
-    os.path.join(os.path.dirname(__file__), "pod-scripts", "mosquitto-start.sh")
+    os.path.join(os.path.dirname(__file__), "pod-scripts", "mosquitto-passwd.sh")
 ) as f:
-    MOSQUITTO_START_SCRIPT = f.read()
+    MOSQUITTO_PASSWD_SCRIPT = f.read()
 
 HOME_ASSISTANT_IMAGE = (
     f"homeassistant/home-assistant:{_versions['homeassistant_image_tag']}"
@@ -76,10 +76,10 @@ def register(namespace):
         opts=pulumi.ResourceOptions(depends_on=[namespace]),
     )
 
-    mosquitto_start = k8s.core.v1.ConfigMap(
-        "mosquitto-start",
-        metadata=ObjectMetaArgs(name="mosquitto-start", namespace=NAMESPACE),
-        data={"mosquitto-start.sh": MOSQUITTO_START_SCRIPT},
+    mosquitto_passwd = k8s.core.v1.ConfigMap(
+        "mosquitto-passwd",
+        metadata=ObjectMetaArgs(name="mosquitto-passwd", namespace=NAMESPACE),
+        data={"mosquitto-passwd.sh": MOSQUITTO_PASSWD_SCRIPT},
         opts=pulumi.ResourceOptions(depends_on=[namespace]),
     )
 
@@ -117,31 +117,39 @@ def register(namespace):
                 ),
                 spec=k8s.core.v1.PodSpecArgs(
                     priority_class_name="app-high",
+                    init_containers=[
+                        # Reads the Secret, writes the hash, exits; the broker mounts neither.
+                        k8s.core.v1.ContainerArgs(
+                            name="passwd",
+                            image=MOSQUITTO_IMAGE,
+                            image_pull_policy="IfNotPresent",
+                            command=["/bin/sh", "/scripts/mosquitto-passwd.sh"],
+                            resources=k8s.core.v1.ResourceRequirementsArgs(
+                                requests={"cpu": "10m", "memory": "16Mi"},
+                                limits={"memory": "64Mi"},
+                            ),
+                            volume_mounts=[
+                                k8s.core.v1.VolumeMountArgs(
+                                    name="mosquitto-data", mount_path="/mosquitto/data"
+                                ),
+                                k8s.core.v1.VolumeMountArgs(
+                                    name="mosquitto-auth",
+                                    mount_path="/run/secrets/mqtt",
+                                    read_only=True,
+                                ),
+                                k8s.core.v1.VolumeMountArgs(
+                                    name="mosquitto-passwd",
+                                    mount_path="/scripts",
+                                    read_only=True,
+                                ),
+                            ],
+                        ),
+                    ],
                     containers=[
                         k8s.core.v1.ContainerArgs(
                             name="mosquitto",
                             image=MOSQUITTO_IMAGE,
                             image_pull_policy="IfNotPresent",
-                            # Wrapper builds the password file, then execs the broker.
-                            command=["/bin/sh", "/scripts/mosquitto-start.sh"],
-                            env=[
-                                k8s.core.v1.EnvVarArgs(
-                                    name="MQTT_USER",
-                                    value_from=k8s.core.v1.EnvVarSourceArgs(
-                                        secret_key_ref=k8s.core.v1.SecretKeySelectorArgs(
-                                            name="mosquitto-auth", key="username"
-                                        )
-                                    ),
-                                ),
-                                k8s.core.v1.EnvVarArgs(
-                                    name="MQTT_PASSWORD",
-                                    value_from=k8s.core.v1.EnvVarSourceArgs(
-                                        secret_key_ref=k8s.core.v1.SecretKeySelectorArgs(
-                                            name="mosquitto-auth", key="password"
-                                        )
-                                    ),
-                                ),
-                            ],
                             ports=[
                                 k8s.core.v1.ContainerPortArgs(
                                     name="mqtt",
@@ -178,11 +186,6 @@ def register(namespace):
                                     mount_path="/mosquitto/config",
                                     read_only=True,
                                 ),
-                                k8s.core.v1.VolumeMountArgs(
-                                    name="mosquitto-start",
-                                    mount_path="/scripts",
-                                    read_only=True,
-                                ),
                             ],
                         ),
                     ],
@@ -200,9 +203,17 @@ def register(namespace):
                             ),
                         ),
                         k8s.core.v1.VolumeArgs(
-                            name="mosquitto-start",
+                            name="mosquitto-passwd",
                             config_map=k8s.core.v1.ConfigMapVolumeSourceArgs(
-                                name="mosquitto-start"
+                                name="mosquitto-passwd"
+                            ),
+                        ),
+                        # 0400: only root inside the init container can read it.
+                        k8s.core.v1.VolumeArgs(
+                            name="mosquitto-auth",
+                            secret=k8s.core.v1.SecretVolumeSourceArgs(
+                                secret_name="mosquitto-auth",
+                                default_mode=0o400,
                             ),
                         ),
                     ],
@@ -214,7 +225,7 @@ def register(namespace):
                 namespace,
                 mosquitto_auth,
                 mosquitto_config,
-                mosquitto_start,
+                mosquitto_passwd,
                 mosquitto_storage,
             ],
             ignore_changes=[
