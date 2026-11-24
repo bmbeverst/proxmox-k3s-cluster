@@ -98,15 +98,29 @@
       "minimumReleaseAge": null
     },
     {
-      "description": "Ghost image: keep the -alpine suffix",
+      "description": "Alpine-pinned images: keep the -alpine suffix",
       "matchDatasources": [
         "docker"
       ],
       "matchDepNames": [
-        "ghost"
+        "ghost",
+        "eclipse-mosquitto"
       ],
       "versioning": "docker",
       "allowedVersions": "/^\\d+\\.\\d+\\.\\d+-alpine$/",
+      "groupName": "non-critical cluster deps",
+      "groupSlug": "non-critical-cluster-deps"
+    },
+    {
+      "description": "Home Assistant: released tags only, never dev/rc/stable",
+      "matchDatasources": [
+        "docker"
+      ],
+      "matchDepNames": [
+        "homeassistant/home-assistant"
+      ],
+      "versioning": "docker",
+      "allowedVersions": "/^\\d{4}\\.\\d+\\.\\d+$/",
       "groupName": "non-critical cluster deps",
       "groupSlug": "non-critical-cluster-deps"
     },
