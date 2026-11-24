@@ -12,6 +12,7 @@ import os
 import pulumi
 import pulumi_kubernetes as k8s
 import yaml
+from pulumi_kubernetes.apiextensions import CustomResource
 from pulumi_kubernetes.meta.v1 import ObjectMetaArgs
 
 with open(os.path.join(os.path.dirname(__file__), "..", "versions.yaml")) as f:
@@ -32,6 +33,9 @@ NAMESPACE = "home-assistant"
 
 HOME_ASSISTANT_PORT = 8123
 MOSQUITTO_PORT = 1883
+MOSQUITTO_TLS_PORT = 8883
+# Public name for the LAN listener: Let's Encrypt, so clients trust it as-is.
+MOSQUITTO_TLS_HOST = "mqtt.lenatin.org"
 
 # kube-vip LB VIPs, LAN only; .64/.65 are free in the .61-.80 pool.
 MOSQUITTO_LB_IP = "10.10.1.64"
@@ -41,6 +45,7 @@ HOME_ASSISTANT_DATA_SIZE = "5Gi"
 MOSQUITTO_DATA_SIZE = "1Gi"
 
 # 2.1 moved auth into a plugin; the password file is rebuilt at every start.
+# 1883 stays plaintext for in-cluster Home Assistant; LAN clients use 8883 + TLS.
 MOSQUITTO_CONFIG = """\
 listener 1883
 allow_anonymous false
@@ -49,6 +54,10 @@ plugin_opt_password_file /mosquitto/data/passwd
 persistence true
 persistence_location /mosquitto/data/
 log_dest stdout
+
+listener 8883
+certfile /mosquitto/certs/tls.crt
+keyfile /mosquitto/certs/tls.key
 """
 
 _cfg = pulumi.Config("my-apps")
@@ -65,6 +74,22 @@ def register(namespace):
         string_data={
             "username": _mosquitto_user,
             "password": _mosquitto_password,
+        },
+        opts=pulumi.ResourceOptions(depends_on=[namespace]),
+    )
+
+    # Public-CA cert for the LAN listener, so clients need no CA bundle. Renewals
+    # rewrite the Secret and reloader rolls the pod.
+    mosquitto_tls = CustomResource(
+        "mosquitto-tls",
+        api_version="cert-manager.io/v1",
+        kind="Certificate",
+        metadata=ObjectMetaArgs(name="mosquitto-tls", namespace=NAMESPACE),
+        spec={
+            "secretName": "mosquitto-tls",
+            "dnsNames": [MOSQUITTO_TLS_HOST],
+            "issuerRef": {"name": "letsencrypt-dns", "kind": "ClusterIssuer"},
+            "privateKey": {"rotationPolicy": "Always"},
         },
         opts=pulumi.ResourceOptions(depends_on=[namespace]),
     )
@@ -186,6 +211,11 @@ def register(namespace):
                                     mount_path="/mosquitto/config",
                                     read_only=True,
                                 ),
+                                k8s.core.v1.VolumeMountArgs(
+                                    name="mosquitto-tls",
+                                    mount_path="/mosquitto/certs",
+                                    read_only=True,
+                                ),
                             ],
                         ),
                     ],
@@ -216,6 +246,13 @@ def register(namespace):
                                 default_mode=0o400,
                             ),
                         ),
+                        # 0644 default: the broker reads these after dropping to 1883.
+                        k8s.core.v1.VolumeArgs(
+                            name="mosquitto-tls",
+                            secret=k8s.core.v1.SecretVolumeSourceArgs(
+                                secret_name="mosquitto-tls"
+                            ),
+                        ),
                     ],
                 ),
             ),
@@ -227,6 +264,7 @@ def register(namespace):
                 mosquitto_config,
                 mosquitto_passwd,
                 mosquitto_storage,
+                mosquitto_tls,
             ],
             ignore_changes=[
                 'spec.template.metadata.annotations["reloader.stakater.com/last-reloaded-from"]',
@@ -252,7 +290,7 @@ def register(namespace):
         opts=pulumi.ResourceOptions(depends_on=[namespace, mosquitto]),
     )
 
-    # TouchKio and the Pi connect here; no TLS, so LAN only.
+    # TouchKio and the Pi connect here; TLS only, so credentials never cross the LAN in clear.
     mosquitto_lb = k8s.core.v1.Service(
         "mosquitto-lb",
         metadata=ObjectMetaArgs(name="mosquitto-lb", namespace=NAMESPACE),
@@ -262,9 +300,9 @@ def register(namespace):
             load_balancer_ip=MOSQUITTO_LB_IP,
             ports=[
                 k8s.core.v1.ServicePortArgs(
-                    name="mqtt",
-                    port=MOSQUITTO_PORT,
-                    target_port=MOSQUITTO_PORT,
+                    name="mqtts",
+                    port=MOSQUITTO_TLS_PORT,
+                    target_port=MOSQUITTO_TLS_PORT,
                 ),
             ],
         ),
