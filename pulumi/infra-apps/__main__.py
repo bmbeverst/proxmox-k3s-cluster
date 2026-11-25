@@ -465,6 +465,11 @@ piraeus = k8s.helm.v3.Release(
         values={
             # LINSTOR brain was BestEffort; no limit (-Xmx8G).
             "linstorCluster": {
+                # Satellites must run on every node: each volume's third quorum vote (a diskless
+                # replica) lives on a control plane today, and LINSTOR may place one anywhere.
+                # Declared explicitly so a future re-render can't drop it and silently remove
+                # the tiebreakers from the control planes.
+                "tolerations": [{"operator": "Exists"}],
                 "controller": {
                     "podTemplate": {
                         "spec": {
