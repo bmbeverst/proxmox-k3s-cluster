@@ -13,5 +13,7 @@ PASSWORD=$(cat "$SECRET_DIR/password")
 [ -n "$PASSWORD" ]
 
 # Rewritten each start so a rotated Secret takes effect; broker drops to uid 1883.
+# mosquitto_passwd refuses to overwrite, so remove the previous file first.
+rm -f /mosquitto/data/passwd
 mosquitto_passwd -b -c /mosquitto/data/passwd "$USERNAME" "$PASSWORD"
 chown 1883:1883 /mosquitto/data/passwd
