@@ -281,7 +281,10 @@ kube_vip = k8s.helm.v3.Release(
                 "vip_arp": "true",
                 "vip_subnet": "32",
                 "cp_enable": "true",
-                "svc_enable": "true",
+                # API VIP only. Service VIPs belong to the worker instance (kube_vip_lb):
+                # with this left true the CP wins the per-service leases, which loses client
+                # IPs and breaks externalTrafficPolicy: Local services (vints) on a CP reboot.
+                "svc_enable": "false",
                 "svc_election": "true",
                 "vip_leaderelection": "true",
                 "lb_enable": "false",
