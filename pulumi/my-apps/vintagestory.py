@@ -62,7 +62,7 @@ VINTS_LB_IP = "10.10.1.91"  # kube-vip LoadBalancer VIP (static)
 # FIFO for server console stdin.
 VINTS_CONSOLE_FIFO = "/tmp/vints-console.fifo"
 VINTS_NFS_SERVER = "10.10.1.101"  # host serving the backup export
-VINTS_NFS_PATH = "/pvebackup"  # export; writable by uid 1001
+VINTS_NFS_PATH = "/pvebackup/vints"  # subdir of the export; 1001:1001, mode 2775
 
 # Mod pins live in git.
 with open(
