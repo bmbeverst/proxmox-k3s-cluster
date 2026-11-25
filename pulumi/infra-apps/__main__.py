@@ -339,6 +339,40 @@ kube_vip_lb = k8s.helm.v3.Release(
 )
 
 
+# k3s ships traefik as a packaged HelmChart; this merges extra values into it.
+traefik_config = CustomResource(
+    "traefik-chart-config",
+    api_version="helm.cattle.io/v1",
+    kind="HelmChartConfig",
+    metadata={"name": "traefik", "namespace": "kube-system"},
+    spec={
+        "valuesContent": """deployment:
+  replicas: 2
+affinity:
+  nodeAffinity:
+    requiredDuringSchedulingIgnoredDuringExecution:
+      nodeSelectorTerms:
+        - matchExpressions:
+            - key: node-role.kubernetes.io/control-plane
+              operator: Exists
+topologySpreadConstraints:
+  - maxSkew: 1
+    topologyKey: kubernetes.io/hostname
+    whenUnsatisfiable: ScheduleAnyway
+    labelSelector:
+      matchLabels:
+        app.kubernetes.io/name: traefik
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    memory: 256Mi
+""",
+    },
+)
+
+
 # Piraeus operator first
 piraeus_operator = k8s.helm.v3.Release(
     "piraeus-operator",
@@ -355,6 +389,56 @@ piraeus_operator = k8s.helm.v3.Release(
 )
 
 
+# System components run on the control-plane: workers stay free for app pods.
+CONTROL_PLANE_AFFINITY = {
+    "nodeAffinity": {
+        "requiredDuringSchedulingIgnoredDuringExecution": {
+            "nodeSelectorTerms": [
+                {
+                    "matchExpressions": [
+                        {
+                            "key": "node-role.kubernetes.io/control-plane",
+                            "operator": "Exists",
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+}
+
+# Pod tolerations are patched atomically, so repeat the operator's defaults.
+CONTROL_PLANE_TOLERATIONS = [
+    {
+        "key": "node-role.kubernetes.io/control-plane",
+        "operator": "Exists",
+        "effect": "NoSchedule",
+    },
+    {
+        "key": "node.kubernetes.io/not-ready",
+        "operator": "Exists",
+        "effect": "NoExecute",
+        "tolerationSeconds": 30,
+    },
+    {
+        "key": "node.kubernetes.io/unreachable",
+        "operator": "Exists",
+        "effect": "NoExecute",
+        "tolerationSeconds": 30,
+    },
+    {
+        "key": "drbd.linbit.com/force-io-error",
+        "operator": "Exists",
+        "effect": "NoSchedule",
+    },
+    {
+        "key": "drbd.linbit.com/lost-quorum",
+        "operator": "Exists",
+        "effect": "NoSchedule",
+    },
+]
+
+
 # Backing store: file-thin pool on the root disk.
 piraeus = k8s.helm.v3.Release(
     "linstor-cluster",
@@ -369,6 +453,8 @@ piraeus = k8s.helm.v3.Release(
                 "controller": {
                     "podTemplate": {
                         "spec": {
+                            "affinity": CONTROL_PLANE_AFFINITY,
+                            "tolerations": CONTROL_PLANE_TOLERATIONS,
                             "containers": [
                                 {
                                     "name": "linstor-controller",
@@ -377,6 +463,60 @@ piraeus = k8s.helm.v3.Release(
                                             "cpu": "500m",
                                             "memory": "1Gi",
                                         },
+                                    },
+                                },
+                            ],
+                        },
+                    },
+                },
+                # Sidecars elect a leader, so two replicas survive one CP loss.
+                "csiController": {
+                    "replicas": 2,
+                    "podTemplate": {
+                        "spec": {
+                            "affinity": CONTROL_PLANE_AFFINITY,
+                            "tolerations": CONTROL_PLANE_TOLERATIONS,
+                            "containers": [
+                                {
+                                    "name": "linstor-csi",
+                                    "resources": {
+                                        "requests": {"cpu": "50m", "memory": "64Mi"},
+                                        "limits": {"memory": "256Mi"},
+                                    },
+                                },
+                                {
+                                    "name": "csi-attacher",
+                                    "resources": {
+                                        "requests": {"cpu": "10m", "memory": "32Mi"},
+                                        "limits": {"memory": "128Mi"},
+                                    },
+                                },
+                                {
+                                    "name": "csi-provisioner",
+                                    "resources": {
+                                        "requests": {"cpu": "10m", "memory": "32Mi"},
+                                        "limits": {"memory": "128Mi"},
+                                    },
+                                },
+                                {
+                                    "name": "csi-resizer",
+                                    "resources": {
+                                        "requests": {"cpu": "10m", "memory": "32Mi"},
+                                        "limits": {"memory": "128Mi"},
+                                    },
+                                },
+                                {
+                                    "name": "csi-snapshotter",
+                                    "resources": {
+                                        "requests": {"cpu": "10m", "memory": "32Mi"},
+                                        "limits": {"memory": "128Mi"},
+                                    },
+                                },
+                                {
+                                    "name": "csi-livenessprobe",
+                                    "resources": {
+                                        "requests": {"cpu": "10m", "memory": "32Mi"},
+                                        "limits": {"memory": "64Mi"},
                                     },
                                 },
                             ],
