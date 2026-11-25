@@ -1,0 +1,7 @@
+[Unit]
+Description=Cache the DRBD 9 build for the running kernel
+
+[Service]
+Type=oneshot
+# Direct exec from /etc is blocked on Flatcar; go through sh.
+ExecStart=/bin/sh /etc/drbd-module-cache.sh

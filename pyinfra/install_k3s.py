@@ -134,6 +134,51 @@ systemd.service(
     _sudo=True,
 )
 
+# Cache the DRBD 9 build per kernel: the piraeus loader otherwise compiles it (~2 min)
+# on every boot. The timer is a no-op once the cache matches the running kernel.
+drbd_cache_script = files.put(
+    name="Install DRBD module cache script",
+    src="files/drbd-module-cache.sh",
+    dest="/etc/drbd-module-cache.sh",
+    mode="644",
+    user="root",
+    group="root",
+    _sudo=True,
+)
+
+drbd_cache_unit = files.put(
+    name="Install DRBD module cache unit",
+    src="files/drbd-module-cache.service",
+    dest="/etc/systemd/system/drbd-module-cache.service",
+    mode="644",
+    user="root",
+    group="root",
+    _sudo=True,
+)
+
+drbd_cache_timer = files.put(
+    name="Install DRBD module cache timer",
+    src="files/drbd-module-cache.timer",
+    dest="/etc/systemd/system/drbd-module-cache.timer",
+    mode="644",
+    user="root",
+    group="root",
+    _sudo=True,
+)
+
+systemd.service(
+    "drbd-module-cache.timer",
+    running=True,
+    enabled=True,
+    daemon_reload=True,
+    _if=(
+        drbd_cache_script.did_change
+        or drbd_cache_unit.did_change
+        or drbd_cache_timer.did_change
+    ),
+    _sudo=True,
+)
+
 # Stage OS updates; kured coordinates reboots.
 files.line(
     name="Set REBOOT_STRATEGY=off so kured coordinates reboots",

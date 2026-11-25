@@ -1,0 +1,11 @@
+[Unit]
+Description=Periodically cache the DRBD 9 build for the running kernel
+
+[Timer]
+# After kubelet has had time to start the satellite and its loader.
+OnBootSec=3min
+OnUnitActiveSec=10min
+AccuracySec=1min
+
+[Install]
+WantedBy=timers.target
