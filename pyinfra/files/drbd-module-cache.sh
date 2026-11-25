@@ -7,7 +7,8 @@
 # so the next boot on the same kernel loads it instantly, via
 # /etc/modprobe.d/zz-drbd-cache.conf and /etc/modules-load.d/drbd.conf.
 #
-# No-op when the cache already matches `uname -r`, so it is safe to run on a timer.
+# No-op when the cache already matches `uname -r`, so the boot-time run on an
+# unchanged kernel does nothing.
 set -eu
 
 base=/var/lib/drbd-modules

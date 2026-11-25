@@ -135,7 +135,7 @@ systemd.service(
 )
 
 # Cache the DRBD 9 build per kernel: the piraeus loader otherwise compiles it (~2 min)
-# on every boot. The timer is a no-op once the cache matches the running kernel.
+# on every boot. The timer runs once per boot, 4 min in.
 drbd_cache_script = files.put(
     name="Install DRBD module cache script",
     src="files/drbd-module-cache.sh",
