@@ -195,11 +195,17 @@ kured = k8s.helm.v3.Release(
             "extraArgs": {
                 # Reboot only if Flatcar update pending AND DRBD healthy.
                 "reboot-sentinel-command": (
-                    "sh -c 'test -f /var/run/reboot-required -o -f /sentinel/reboot-required"
-                    ' && P=$(pgrep -f core.Satellite | head -1) && [ -n "$P" ]'
-                    " && O=$(nsenter -m/proc/$P/ns/mnt -n/proc/$P/ns/net -- /usr/sbin/drbdadm status 2>/dev/null)"
-                    ' && ! printf %s "$O" | grep -qE "connection:(StandAlone|Connecting|Disconnecting|WFConnection)'
-                    "|disk:(Inconsistent|Outdated)|suspended:quorum\"'"
+                    "sh -c 'test -f /var/run/reboot-required -o -f /sentinel/reboot-required || exit 1; "
+                    # pidof+cmdline: pgrep -f matches kured's own command line.
+                    "P=$(for p in $(pidof java); do "
+                    "grep -qa com.linbit.linstor.core.Satellite /proc/$p/cmdline "
+                    "&& echo $p && break; done); "
+                    '[ -n "$P" ] || exit 1; '
+                    "O=$(nsenter -m/proc/$P/ns/mnt -n/proc/$P/ns/net -- "
+                    "/usr/sbin/drbdadm status 2>/dev/null) || exit 1; "
+                    'printf %s "$O" | grep -qE "connection:(StandAlone|Connecting'
+                    '|Disconnecting|WFConnection)|disk:(Inconsistent|Outdated)" && exit 1; '
+                    "exit 0'"
                 ),
             },
             "configuration": {
