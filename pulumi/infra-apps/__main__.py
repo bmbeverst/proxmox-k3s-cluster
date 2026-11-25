@@ -124,6 +124,14 @@ server_plan = CustomResource(
                 }
             ],
         },
+        # The job must run on the tainted control-plane node it upgrades.
+        "tolerations": [
+            {
+                "key": "node-role.kubernetes.io/control-plane",
+                "operator": "Exists",
+                "effect": "NoSchedule",
+            }
+        ],
         "serviceAccountName": "system-upgrade",
         "upgrade": {
             "image": "rancher/k3s-upgrade",

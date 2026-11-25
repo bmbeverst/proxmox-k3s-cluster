@@ -34,6 +34,13 @@ The hook definitions use `repo: local` with the tools from the `lint` group in
 CI (`.gitlab-ci.yml`) runs the same `pre-commit run --all-files`, but only on
 the weekly schedule — pushes are guarded by the local pre-push hook instead.
 
+## Placement
+
+Control-plane nodes carry `node-role.kubernetes.io/control-plane:NoSchedule`
+(see `pyinfra/files/k3s_config.yaml`): only DaemonSets and control-plane
+components run there. App pods and their `linstor-r2` replicas live on the
+workers (node5/node6), so a pod always attaches a local replica.
+
 ## Components
 
 ### Flatcar

@@ -15,6 +15,10 @@ systemReserved:
   cpu: "100m" # Reserve 100 millicores for OS
   memory: "150Mi" # Reserve 150MB for system processes
 
+# Workloads run on the workers; servers keep control-plane and storage daemons.
+node-taint:
+  - "node-role.kubernetes.io/control-plane:NoSchedule"
+
 # kube-vip owns LB VIPs; server-only keys, agents reject them.
 disable:
   - servicelb
