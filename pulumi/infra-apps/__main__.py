@@ -1017,6 +1017,8 @@ keda = k8s.helm.v3.Release(
             repo=_chart_deps["keda"]["repository"],
         ),
         values={
+            # CRDs come from git; the admission webhook only validates/defaults them.
+            "webhooks": {"enabled": False},
             "resources": {
                 "operator": {
                     "requests": {"cpu": "50m", "memory": "100Mi"},
@@ -1054,13 +1056,18 @@ keda_http = k8s.helm.v3.Release(
                     "limits": {"memory": "128Mi"},
                 },
             },
+            # One app, one request path: 3 scaler replicas are wasted.
             "scaler": {
+                "replicas": 1,
                 "resources": {
                     "requests": {"cpu": "10m", "memory": "64Mi"},
                     "limits": {"memory": "128Mi"},
                 },
             },
+            # Interceptor is the HTTP entry point for scale-from-zero. One replica is enough here,
+            # and with min=1 its PDB allows a drain to evict it instead of stalling.
             "interceptor": {
+                "replicas": {"min": 1, "max": 5},
                 "resources": {
                     "requests": {"cpu": "10m", "memory": "64Mi"},
                     "limits": {"memory": "192Mi"},
