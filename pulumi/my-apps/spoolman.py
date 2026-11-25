@@ -36,12 +36,32 @@ SPOOLMAN_DATA_SIZE = "1Gi"
 SPOOLMAN_LB_IP = "10.10.1.63"
 # DNS-rebinding guard allowlist.
 SPOOLMAN_ALLOWED_HOST = SPOOLMAN_LB_IP
-# Same NFS export as vints, own subdir.
+# Own subdir on the vints export; created on the OMV as 1001:1001, mode 2775.
+# NFSv4 needs the subpath to exist server-side, or the mount fails with ENOENT.
 SPOOLMAN_NFS_SERVER = "10.10.1.101"
 SPOOLMAN_NFS_PATH = "/pvebackup/spoolman"
 # Backup joins via vints gid 1001.
 VINTS_NFS_GID = 1001
 SPOOLMAN_BACKUP_KEEP = 7
+
+
+def _spoolman_backup_placement():
+    """Run the backup on the node that already has spoolman-data attached.
+
+    The PVC is ReadWriteOnce, so a second pod on another node cannot attach it.
+    """
+    return k8s.core.v1.AffinityArgs(
+        pod_affinity=k8s.core.v1.PodAffinityArgs(
+            required_during_scheduling_ignored_during_execution=[
+                k8s.core.v1.PodAffinityTermArgs(
+                    topology_key="kubernetes.io/hostname",
+                    label_selector=k8s.meta.v1.LabelSelectorArgs(
+                        match_labels={"app": "spoolman"},
+                    ),
+                ),
+            ],
+        ),
+    )
 
 
 def register(namespace):
@@ -198,6 +218,8 @@ def register(namespace):
                         metadata=ObjectMetaArgs(labels={"app": "spoolman-backup"}),
                         spec=k8s.core.v1.PodSpecArgs(
                             restart_policy="Never",
+                            # RWO volume: must run where spoolman-data is attached.
+                            affinity=_spoolman_backup_placement(),
                             # uid 1000 (WAL -shm); gid 1001 (NFS grant).
                             security_context=k8s.core.v1.PodSecurityContextArgs(
                                 run_as_user=SPOOLMAN_UID,
@@ -218,7 +240,10 @@ def register(namespace):
                                             "name": "DATA_PATH",
                                             "value": SPOOLMAN_DATA_DIR,
                                         },
-                                        {"name": "BACKUP_DEST", "value": "/backups"},
+                                        {
+                                            "name": "BACKUP_DEST",
+                                            "value": "/backups",
+                                        },
                                         {
                                             "name": "KEEP",
                                             "value": str(SPOOLMAN_BACKUP_KEEP),
