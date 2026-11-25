@@ -192,6 +192,21 @@ kured = k8s.helm.v3.Release(
             repo=_chart_deps["kured"]["repository"],
         ),
         values={
+            # Must be declared: the live DaemonSet tolerates these, but the chart default is [].
+            # Without them (e.g. after a chart bump re-renders this release) kured stops covering
+            # node1/2/4 and staged Flatcar updates there would never be rebooted.
+            "tolerations": [
+                {
+                    "key": "node-role.kubernetes.io/control-plane",
+                    "operator": "Exists",
+                    "effect": "NoSchedule",
+                },
+                {
+                    "key": "node-role.kubernetes.io/master",
+                    "operator": "Exists",
+                    "effect": "NoSchedule",
+                },
+            ],
             "extraArgs": {
                 # Reboot only if Flatcar update pending AND DRBD healthy.
                 "reboot-sentinel-command": (
