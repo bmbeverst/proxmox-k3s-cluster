@@ -134,8 +134,29 @@ systemd.service(
     _sudo=True,
 )
 
+# Load DRBD 9 at boot from the cached build instead of compiling it in the satellite.
+files.put(
+    name="Install DRBD cache modprobe rule",
+    src="files/zz-drbd-cache.conf",
+    dest="/etc/modprobe.d/zz-drbd-cache.conf",
+    mode="644",
+    user="root",
+    group="root",
+    _sudo=True,
+)
+
+files.put(
+    name="Install DRBD modules-load list",
+    src="files/drbd-modules-load.conf",
+    dest="/etc/modules-load.d/drbd.conf",
+    mode="644",
+    user="root",
+    group="root",
+    _sudo=True,
+)
+
 # Cache the DRBD 9 build per kernel: the piraeus loader otherwise compiles it (~2 min)
-# on every boot. The timer runs once per boot, 4 min in.
+# on every boot. The timer runs once per boot, 8 min in.
 drbd_cache_script = files.put(
     name="Install DRBD module cache script",
     src="files/drbd-module-cache.sh",

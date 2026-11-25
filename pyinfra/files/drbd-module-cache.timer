@@ -2,9 +2,8 @@
 Description=Cache the DRBD 9 build for the running kernel
 
 [Timer]
-# Once per boot, after kubelet has started the satellite and its loader has
-# finished compiling (measured 83-112s).
-OnBootSec=4min
+# Once per boot: 8 min in, roughly 4x the measured 83-112s compile.
+OnBootSec=8min
 
 [Install]
 WantedBy=timers.target
