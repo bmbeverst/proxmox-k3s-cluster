@@ -218,32 +218,6 @@ kured = k8s.helm.v3.Release(
 )
 
 
-# No auto-place on control-plane.
-satellite_no_autoplace_cp = CustomResource(
-    "no-autoplace-on-cp",
-    api_version="piraeus.io/v1",
-    kind="LinstorSatelliteConfiguration",
-    metadata={"name": "no-autoplace-on-cp"},
-    spec={
-        "nodeAffinity": {
-            "nodeSelectorTerms": [
-                {
-                    "matchExpressions": [
-                        {
-                            "key": "node-role.kubernetes.io/control-plane",
-                            "operator": "Exists",
-                        }
-                    ]
-                }
-            ]
-        },
-        "properties": [
-            {"name": "AutoplaceTarget", "value": "false"},
-        ],
-    },
-)
-
-
 # PriorityClasses for preemption.
 for _pc_name, _pc_value in [
     ("app-high", "1000000"),
@@ -405,16 +379,10 @@ piraeus = k8s.helm.v3.Release(
                 },
             },
             "linstorSatelliteConfigurations": [
+                # Every node runs the same satellite pod, control-plane included:
+                # the CP nodes are the diskless quorum tiebreakers.
                 {
-                    "name": "storage-pool",
-                    "storagePools": [
-                        {
-                            "name": "file-thin",
-                            "fileThinPool": {
-                                "directory": "/var/lib/linstor-pools/file-thin",
-                            },
-                        },
-                    ],
+                    "name": "satellite-pod",
                     "podTemplate": {
                         "spec": {
                             "hostNetwork": True,
@@ -448,6 +416,31 @@ piraeus = k8s.helm.v3.Release(
                             ],
                         },
                     },
+                },
+                # Workers hold the data: with no pool on the control-plane, the
+                # autoplacer can only put a diskless tiebreaker there.
+                {
+                    "name": "storage-pool",
+                    "nodeAffinity": {
+                        "nodeSelectorTerms": [
+                            {
+                                "matchExpressions": [
+                                    {
+                                        "key": "node-role.kubernetes.io/control-plane",
+                                        "operator": "DoesNotExist",
+                                    }
+                                ]
+                            }
+                        ]
+                    },
+                    "storagePools": [
+                        {
+                            "name": "file-thin",
+                            "fileThinPool": {
+                                "directory": "/var/lib/linstor-pools/file-thin",
+                            },
+                        },
+                    ],
                 },
             ],
             "storageClasses": [

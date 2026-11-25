@@ -41,6 +41,13 @@ Control-plane nodes carry `node-role.kubernetes.io/control-plane:NoSchedule`
 components run there. App pods and their `linstor-r2` replicas live on the
 workers (node5/node6), so a pod always attaches a local replica.
 
+Control-plane nodes get no `file-thin` pool (`linstorSatelliteConfigurations` in
+`pulumi/infra-apps/__main__.py`), so the autoplacer can only put a diskless
+replica there. LINSTOR's `DrbdOptions/auto-add-quorum-tiebreaker` (on by default)
+then keeps exactly one such replica per volume: two diskful workers plus one
+diskless control-plane peer, which is what lets DRBD keep quorum when a worker
+drops.
+
 ## Components
 
 ### Flatcar
