@@ -633,8 +633,6 @@ piraeus = k8s.helm.v3.Release(
     opts=pulumi.ResourceOptions(depends_on=[piraeus_operator]),
 )
 
-# VolumeSnapshot CRDs + controller. VolSync's `copyMethod: Snapshot` needs them, and the
-# VolumeSnapshotClass is what routes a snapshot to the LINSTOR driver.
 snapshot_controller = k8s.helm.v3.Release(
     "snapshot-controller",
     k8s.helm.v3.ReleaseArgs(
@@ -644,7 +642,6 @@ snapshot_controller = k8s.helm.v3.Release(
         create_namespace=True,
         values={
             "installCRDs": True,
-            # Deleting the release must not delete every VolumeSnapshot with it.
             "keepCRDs": True,
             "controller": {
                 "affinity": CONTROL_PLANE_AFFINITY,
@@ -654,20 +651,25 @@ snapshot_controller = k8s.helm.v3.Release(
                     "limits": {"memory": "128Mi"},
                 },
             },
-            # linstor is the only snapshot-capable driver here: local-path has none.
-            "volumeSnapshotClasses": [
-                {
-                    "name": "linstor-snap",
-                    "driver": "linstor.csi.linbit.com",
-                    "deletionPolicy": "Delete",
-                }
-            ],
         },
         timeout=600,
     ),
 )
 
-# VolSync: restic backups of app PVCs, repo on the OMV NFS export.
+# Own resource (chart validates the VSC before its CRD); Retain keeps the snapshot.
+linstor_snapshot_class = CustomResource(
+    "linstor-snap",
+    api_version="snapshot.storage.k8s.io/v1",
+    kind="VolumeSnapshotClass",
+    metadata={"name": "linstor-snap"},
+    spec={
+        "driver": "linstor.csi.linbit.com",
+        "deletionPolicy": "Retain",
+    },
+    opts=ResourceOptions(depends_on=[snapshot_controller]),
+)
+
+# VolSync: restic backups of app PVCs to the OMV NFS export.
 volsync = k8s.helm.v3.Release(
     "volsync",
     k8s.helm.v3.ReleaseArgs(
@@ -679,9 +681,7 @@ volsync = k8s.helm.v3.Release(
             repo=_chart_deps["volsync"]["repository"],
         ),
         values={
-            # CRDs ship with the chart; kept on uninstall like the piraeus ones.
             "manageCRDs": True,
-            # VMSingle scrapes in-cluster without auth.
             "metrics": {"disableAuth": True},
             "affinity": CONTROL_PLANE_AFFINITY,
             "tolerations": CONTROL_PLANE_TOLERATIONS,
@@ -692,7 +692,7 @@ volsync = k8s.helm.v3.Release(
         },
         timeout=600,
     ),
-    opts=ResourceOptions(depends_on=[snapshot_controller]),
+    opts=ResourceOptions(depends_on=[snapshot_controller, linstor_snapshot_class]),
 )
 
 # cert-manager issues TLS certs
