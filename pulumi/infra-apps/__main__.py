@@ -657,15 +657,14 @@ snapshot_controller = k8s.helm.v3.Release(
 )
 
 # Own resource (chart validates the VSC before its CRD); Retain keeps the snapshot.
+# driver/deletionPolicy are top-level fields: VolumeSnapshotClass has no spec.
 linstor_snapshot_class = CustomResource(
     "linstor-snap",
     api_version="snapshot.storage.k8s.io/v1",
     kind="VolumeSnapshotClass",
     metadata={"name": "linstor-snap"},
-    spec={
-        "driver": "linstor.csi.linbit.com",
-        "deletionPolicy": "Retain",
-    },
+    driver="linstor.csi.linbit.com",
+    deletionPolicy="Retain",
     opts=ResourceOptions(depends_on=[snapshot_controller]),
 )
 
