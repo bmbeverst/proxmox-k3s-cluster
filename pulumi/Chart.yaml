@@ -39,3 +39,9 @@ dependencies:
   - name: keda-add-ons-http
     repository: https://kedacore.github.io/charts
     version: 0.16.0
+  - name: snapshot-controller
+    repository: oci://ghcr.io/piraeusdatastore/helm-charts
+    version: 5.4.1
+  - name: volsync
+    repository: https://backube.github.io/helm-charts
+    version: 0.17.0

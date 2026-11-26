@@ -633,6 +633,68 @@ piraeus = k8s.helm.v3.Release(
     opts=pulumi.ResourceOptions(depends_on=[piraeus_operator]),
 )
 
+# VolumeSnapshot CRDs + controller. VolSync's `copyMethod: Snapshot` needs them, and the
+# VolumeSnapshotClass is what routes a snapshot to the LINSTOR driver.
+snapshot_controller = k8s.helm.v3.Release(
+    "snapshot-controller",
+    k8s.helm.v3.ReleaseArgs(
+        chart="oci://ghcr.io/piraeusdatastore/helm-charts/snapshot-controller",
+        version=_chart_deps["snapshot-controller"]["version"],
+        namespace="snapshot-controller",
+        create_namespace=True,
+        values={
+            "installCRDs": True,
+            # Deleting the release must not delete every VolumeSnapshot with it.
+            "keepCRDs": True,
+            "controller": {
+                "affinity": CONTROL_PLANE_AFFINITY,
+                "tolerations": CONTROL_PLANE_TOLERATIONS,
+                "resources": {
+                    "requests": {"cpu": "10m", "memory": "32Mi"},
+                    "limits": {"memory": "128Mi"},
+                },
+            },
+            # linstor is the only snapshot-capable driver here: local-path has none.
+            "volumeSnapshotClasses": [
+                {
+                    "name": "linstor-snap",
+                    "driver": "linstor.csi.linbit.com",
+                    "deletionPolicy": "Delete",
+                }
+            ],
+        },
+        timeout=600,
+    ),
+)
+
+# VolSync: restic backups of app PVCs, repo on the OMV NFS export.
+volsync = k8s.helm.v3.Release(
+    "volsync",
+    k8s.helm.v3.ReleaseArgs(
+        chart="volsync",
+        version=_chart_deps["volsync"]["version"],
+        namespace="volsync-system",
+        create_namespace=True,
+        repository_opts=k8s.helm.v3.RepositoryOptsArgs(
+            repo=_chart_deps["volsync"]["repository"],
+        ),
+        values={
+            # CRDs ship with the chart; kept on uninstall like the piraeus ones.
+            "manageCRDs": True,
+            # VMSingle scrapes in-cluster without auth.
+            "metrics": {"disableAuth": True},
+            "affinity": CONTROL_PLANE_AFFINITY,
+            "tolerations": CONTROL_PLANE_TOLERATIONS,
+            "resources": {
+                "requests": {"cpu": "50m", "memory": "128Mi"},
+                "limits": {"memory": "256Mi"},
+            },
+        },
+        timeout=600,
+    ),
+    opts=ResourceOptions(depends_on=[snapshot_controller]),
+)
+
 # cert-manager issues TLS certs
 cert_manager = k8s.helm.v3.Release(
     "cert-manager",
