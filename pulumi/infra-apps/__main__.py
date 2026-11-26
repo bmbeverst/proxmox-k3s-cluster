@@ -736,6 +736,29 @@ traefik_default_tls = CustomResource(
     opts=ResourceOptions(depends_on=[wildcard_cert]),
 )
 
+# The Mosquitto cert (my-apps) only carries DNS:mqtt.lenatin.org, and that name
+# has no public record because DNS-01 issuance does not need one. Pin it to the
+# broker's LAN VIP so in-cluster clients can verify the cert by hostname; every
+# other name in the zone still resolves via the default block. k3s imports
+# /etc/coredns/custom/*.server as top-level server blocks.
+MOSQUITTO_TLS_HOST = "mqtt.lenatin.org"
+MOSQUITTO_LB_IP = "10.10.1.64"  # owned by my-apps/homeassistant.py
+COREDNS_MQTT_SERVER = f"""\
+{MOSQUITTO_TLS_HOST}:53 {{
+    errors
+    hosts {{
+        {MOSQUITTO_LB_IP} {MOSQUITTO_TLS_HOST}
+        fallthrough
+    }}
+    forward . /etc/resolv.conf
+}}
+"""
+coredns_custom = k8s.core.v1.ConfigMap(
+    "coredns-custom",
+    metadata={"name": "coredns-custom", "namespace": "kube-system"},
+    data={"mqtt.server": COREDNS_MQTT_SERVER},
+)
+
 # Cloudflare origin lock-down.
 _CF_ORIGIN_PULL_CA_URL = (
     "https://developers.cloudflare.com/ssl/static/authenticated_origin_pull_ca.pem"
